@@ -25,7 +25,7 @@ Internal methods are usually preceded with a _
 package LGTSeek;
 use strict;
 use version;
-
+use File::Basename;
 # Dependencies
 use GiTaxon;
 $| = 1;
@@ -114,13 +114,17 @@ sub prinseqFilterBam {
     # Override if it is provided
     $self->{prinseq_bin} = $config->{prinseq_bin} ? $config->{prinseq_bin} :$self->{prinseq_bin};
 
-    if(!$self->{ergatis_bin} || $self->{prinseq_bin}) {
-        die "Must provide an ergatis_bin and prinseq_bin parameter to run prinseq filtering\n";
+    if($config->{output_dir}) {
+        $self->_run_cmd("mkdir $config->{output_dir}");
+    }
+    
+    if(!$self->{ergatis_bin} || !$self->{prinseq_bin}) {
+        die "Must provide an ergatis_bin and prinseq_bin parameter to run prinseq filtering $self->{prinseq_bin} $self->{ergatis_bin}\n";
     }
 
     my $retval;
     if($self->{paired_end}) {
-        $retval = $self->_prinseqFilterPaired($config->{bam_file});
+        $retval = $self->_prinseqFilterPaired($config->{bam_file},$config->{output_dir});
     }
     else {
         die "Single end is currently not implemented\n";
@@ -140,65 +144,111 @@ sub prinseqFilterBam {
 =cut
 
 sub _prinseqFilterPaired {
-    my($self,$bam_file) = @_;
+    my($self,$bam_file,$output_dir) = @_;
 
     my($name,$path,$suff) = fileparse($bam_file,'.bam');
+
+    $output_dir = $output_dir ? $output_dir : $path;
 
     my $bin = $self->{ergatis_bin};
     my $prinseq_bin = $self->{prinseq_bin};
     my $samtools = $self->{samtools_bin};
 
     # Generate concatenated fastq files for prinseq derep filtering
-    my $cmd = "perl $bin/sam2fasta.pl --input=$bam_file --fastq=1 --combine_mates=1 --output_file=$path/$name\_combined.fastq";
+    my $cmd = "perl $bin/sam2fasta.pl --input=$bam_file --fastq=1 --combine_mates=1 --output_file=$output_dir/$name\_combined.fastq";
+    print STDERR "$cmd\n";
     $self->_run_cmd($cmd);
     # Run prinseq for dereplication
-    my $cmd = "perl $prinseq_bin --fastq=$path/$name\_combined.fastq --out_good=$path/$name\_derep_good --out_bad=$path/$name\_derep_bad -derep 14";
+    my $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_combined.fastq --out_good=$output_dir/$name\_derep_good --out_bad=$output_dir/$name\_derep_bad -derep 14";
+    print STDERR "$cmd\n";
     $self->_run_cmd($cmd);
 
     # Pull out bad ids
-    my $cmd = "perl -e 'while(<>){s/\@//;print;<>;<>;<>;}' $path/$name\_derep_bad.fastq > $path/$name\_derep_bad_ids.out";
+    my $cmd = "perl -e 'while(<>){s/\@//;print;<>;<>;<>;}' $output_dir/$name\_derep_bad.fastq > $output_dir/$name\_derep_bad_ids.out";
     print STDERR "$cmd\n";
     $self->_run_cmd($cmd);
 
     # Generate single-read fastq for low complexity filtering
-    my $cmd = "perl $bin/sam2fasta.pl --input=$bam_file --fastq=1 --combine_mates=0 --paired=1 --output_file=$path/$name.fastq";
+    my $cmd = "perl $bin/sam2fasta.pl --input=$bam_file --fastq=1 --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
     $self->_run_cmd($cmd);
 
     # Run prinseq for low complexity filtering
-    my $cmd = "perl /mnt/prinseq-lite2.pl --fastq=$path/$name\_1.fastq --out_good=$path/$name\_lc_1_good --out_bad=$path/$name\_lc_1_bad -lc_method dust -lc_threshold 7";
+    my $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_1.fastq --out_good=$output_dir/$name\_lc_1_good --out_bad=$output_dir/$name\_lc_1_bad -lc_method dust -lc_threshold 7";
     $self->_run_cmd($cmd);
 
     # Pull out bad ids
-    my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $path/$name\_lc_1_bad.fastq > $path/$name\_lc_1_bad_ids.out";
+    my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_1_bad.fastq > $output_dir/$name\_lc_1_bad_ids.out";
     $self->_run_cmd($cmd);
 
 
     # Run prinseq for low complexity filtering
-    my $cmd = "perl /mnt/prinseq-lite2.pl --fastq=$path/$name\_2.fastq --out_good=$path/$name\_lc_2_good --out_bad=$path/$name\_lc_2_bad -lc_method dust -lc_threshold 7";
+    my $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_2.fastq --out_good=$output_dir/$name\_lc_2_good --out_bad=$output_dir/$name\_lc_2_bad -lc_method dust -lc_threshold 7";
     $self->_run_cmd($cmd);
 
     # Pull out bad ids
-    my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $path/$name\_lc_2_bad.fastq > $path/$name\_lc_2_bad_ids.out";
+    my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_2_bad.fastq > $output_dir/$name\_lc_2_bad_ids.out";
     $self->_run_cmd($cmd);
 
     # Merge bad ids from derep and lc filtering
-    my $cmd = "cat $path/$name\_derep_bad_ids.out $path/$name\_lc_1_bad_ids.out $path/$name\_lc_2_bad_ids.out | sort -u > $path/$name\_bad_ids.out";
+    my $cmd = "cat $output_dir/$name\_derep_bad_ids.out $output_dir/$name\_lc_1_bad_ids.out $output_dir/$name\_lc_2_bad_ids.out | sort -u > $output_dir/$name\_bad_ids.out";
    $self->_run_cmd($cmd);
 
     # Filter sam file to remove bad ids
 
-    my $cmd = "perl $bin/filter_sam_from_prinseq.pl --sam_file=$bam_file --bad_list=$path/$name\_bad_ids.out --out_file=$path/$name\_filtered.sam";
+    my $cmd = "perl $bin/filter_sam_from_prinseq.pl --sam_file=$bam_file --bad_list=$output_dir/$name\_bad_ids.out --out_file=$output_dir/$name\_filtered.sam";
     $self->_run_cmd($cmd);
 
-    my $cmd = "$samtools view -S -b $path/$name\_filtered.sam > $path/$name\_filtered.bam";
+    my $cmd = "$samtools view -S -b $output_dir/$name\_filtered.sam > $output_dir/$name\_filtered.bam";
     $self->_run_cmd($cmd);
 
-    $self->_run_cmd($cmd);
-#    `rm $path/$name\_filtered.sam`; 
-    return "$path/$name\_filtered.bam";
+
+    my $count = $self->_run_cmd("$samtools view $output_dir/$name\_filtered.bam | cut -f1 | uniq | wc -l");
+    chomp $count;
+#    my $cmd = "perl $bin/sam2fasta.pl --input=$output_dir/$name\_filtered.bam --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
+#    $self->_run_cmd($cmd);
+#    `rm $output_dir/$name\_filtered.sam`; 
+    return {
+        count => $count,
+        file => "$output_dir/$name\_filtered.bam"
+    }
 
 }
 
+=head2 run_cmd
+
+ Title   : sam2Fasta
+ Usage   : my $fastas = $LGTSeek->sam2Fasta({'input' => '/path/to/file.bam'...})
+ Function: Convert a bam/sam file to a fasta file
+ Returns : a list of fasta/fastq files
+ Args    : sam or bam file to convert
+
+=cut
+sub sam2Fasta {
+    my($self, $config) = @_;
+    my $bin = $self->{ergatis_bin};
+
+    my $outfile;
+    my($name,$path,$suff) = fileparse($config->{input},(qr/.bam$||.sam$||.sam.gz$/));
+    my $cmd = "perl $bin/sam2fasta.pl --input=$config->{input}";
+    if($config->{fastq}) {
+        $outfile = "$self->{output_dir}/$name.fastq";
+        $cmd .= " --fastq=1 --output_file=$outfile";
+    }
+    else {
+        $outfile = "$self->{output_dir}/$name.fasta";
+        $cmd .= " --fastq=0 --output_file=$outfile";
+    }
+    if($config->{combine_mates}) {
+        $cmd .= " --combine_mates=0";
+    }
+    if($config->{paired}) {
+        $cmd .= " --paired=1";
+    }
+    
+    $self->_run_cmd($cmd);
+
+    return $outfile;
+}
 
 =head2 run_cmd
 
@@ -211,7 +261,7 @@ sub _prinseqFilterPaired {
 =cut
 sub _run_cmd {
 
-    my $cmd = shift;
+    my($self, $cmd) = @_;
 
     my $res = `$cmd`;
     if($?) {
@@ -241,8 +291,9 @@ sub downloadSRA {
     $self->{aspera_path} = $config->{aspera_path} ? $config->{aspera_path} : $self->{aspera_path};
     $self->{aspera_rate} = $config->{aspera_rate} ? $config->{aspera_rate} : $self->{aspera_rate};
     $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->{aspera_path} = $self->{aspera_path} ? $self->{aspera_path} : '~/.aspera/connect/';
 
-
+    my $retry_attempts = $config->{retry_attempts} ? $config->{retry_attempts} : 10;
     if(!$self->{aspera_host}) {
         $self->{aspera_host} = 'ftp-private.ncbi.nlm.nih.gov';
     }
@@ -289,21 +340,39 @@ sub downloadSRA {
     # Make sure the output directory is present
     $self->_run_cmd("mkdir -p $output_dir");
 
-    my $cmd_string = "$self->{aspera_path}/bin/ascp -QTd -l$self->{aspera_rate} -i $self->{aspera_path}/etc/asperaweb_id_dsa.putty $self->{aspera_user}\@$self->{aspera_host}:$path_to_file $self->{output_dir} -L $output_dir -o Overwrite=diff 2>&1";
 
-    # Doing this echo y to ensure we accept any certs.
-    my $out = `echo y | $cmd_string`;
+    my $cmd_string = "$self->{aspera_path}/bin/ascp -QTd -l$self->{aspera_rate} -i $self->{aspera_path}/etc/asperaweb_id_dsa.putty $self->{aspera_user}\@$self->{aspera_host}:$path_to_file $output_dir -L $output_dir -o Overwrite=diff 2>&1";
 
-    # We can actually exit non-0 and still succeed if the 
-    if($out =~ /Error/)  {
-        print STDERR "Had a problem downloading $self->{aspera_host}:$path_to_file to $output_dir\n";
-        print STDERR "$cmd_string";
-        exit(1);
-    }
-    else {
-        print STDERR "$? $out Successfully downloaded $self->{aspera_host}:$path_to_file to $output_dir\n";
-    }
-    my @files = `find $output_dir -name '*.sra'`;
+
+    #Retry the download several times just incase.
+    my $retry = 1;
+
+    my $retries = 0;
+    while($retry) {
+        
+        # Doing this echo y to ensure we accept any certs.
+        my $out = '';#`echo y | $cmd_string`;
+
+        # We can actually exit non-0 and still succeed if the 
+        if($out =~ /Error/)  {
+            print STDERR "Had a problem downloading $self->{aspera_host}:$path_to_file to $output_dir\n";
+            print STDERR "$cmd_string";
+            if($retries < $retry_attempts) {
+                $retries++;
+                sleep $retries*2; # Sleep for 2 seconds per retry.
+            }
+            else {
+                print STDERR "Retries exhausted. Tried $retries times.\n$cmd_string";
+                exit(1);
+            }
+        }
+        else {
+            $retry = 0;
+            print STDERR "$? $out Successfully downloaded $self->{aspera_host}:$path_to_file to $output_dir\n";
+        }
+     }   
+
+    my @files = `find $output_dir -name *.sra`;
     return \@files;
 }
 
@@ -322,15 +391,21 @@ sub dumpFastq {
 
     $self->{sratoolkit_path} = $config->{sratoolkit_path} ? $config->{sratoolkit_path} : $self->{sratoolkit_path};
 
+    # If we don't have a path provided we'll hope it's in our path.
+    my $fastqdump_bin = $self->{sratoolkit_path} ? "$self->{sratoolkit_path}/fastq-dump" : "fastq-dump";
 
+    $config->{sra_file} =~ s/\/\//\//g;
     # Need to pull the version of the sratoolkit to determine if we need the --split-3 parameter.
-    my $ret = `$self->{sratoolkit_path}/fastq-dump -V`;
-    $ret =~ /fastq-dump : ([\d.]+)/;
-    my $version = version->parse($1);
-    my $cutoff_version = version->parse('2.1.0');
-
-    my $fastqdump_bin = "$self->{sratoolkit_path}/fastq-dump";
-
+    my $ret = `$fastqdump_bin -V`;
+    my $version;
+    my $cutoff_version;
+    if($ret =~ /fastq-dump : ([\d.]+)/) {
+        $version = version->parse($1);
+        $cutoff_version = version->parse('2.1.0');
+    }
+    else {
+        die "$? $ret $fastqdump_bin\n";
+    }
     if($version > $cutoff_version) {
 
         $fastqdump_bin .= " --split-3 ";
@@ -340,13 +415,15 @@ sub dumpFastq {
         die "Need to specify an output_dir in order to download from the sra\n";
     }
 
-    my ($name,$path,$suff) = fileparse($config->{sra_file});
+    my ($name,$path,$suff) = fileparse($config->{sra_file},'.sra');
     my $cmd = "$fastqdump_bin -O $self->{output_dir} $config->{sra_file}";
+    #$self->_run_cmd($cmd);
 
-    $self->_run_cmd($cmd);
-
+    chomp $name;
     my $res = $self->_run_cmd("find $self->{output_dir} -name '$name*.fastq'");
     my @files = split(/\n/,$res);
+
+    print STDERR "@files\n";
 
     my $retval = {
         'files' => \@files,
@@ -354,7 +431,7 @@ sub dumpFastq {
         'basename' => $name,
         'paired_end' => 0
     };
-    if($files[0] =~ /_1.fastq/) {
+    if($files[0] =~ /_\d.fastq/) {
         $retval->{paired_end} = 1;
     }
     return $retval;
@@ -385,14 +462,15 @@ sub runBWA {
     my($self,$config) = @_;
 
     $self->{bin_dir} = $config->{bin_dir} ? $config->{bin_dir} : $self->{bin_dir};
-    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     # Check for a bwa path. If we don't have one we'll just hope it's in our global path.
     $self->{bwa_path} = $config->{bwa_path} ? $config->{bwa_path} : $self->{bwa_path};
     $self->{bwa_path} = $self->{bwa_path} ? $self->{bwa_path} : 'bwa';
 
+    $self->_run_cmd("mkdir -p $output_dir");
 
     # Build the command string;
-    my @cmd = ("$self->{bin_dir}/lgt_bwa --bwa_path=$self->{bwa_path} --bin_dir=$self->{bin_dir}");
+    my @cmd = ("$self->{bin_dir}/lgt_bwa --num_aligns=0 --bwa_path=$self->{bwa_path}");
 
     my $suff = '.sam';
     if($config->{output_bam}) {
@@ -410,7 +488,7 @@ sub runBWA {
         push(@cmd,"--input_bam=$config->{input_bam}");
     }
     elsif($config->{input_dir} && $config->{input_base}) {
-        push(@cmd,"--input_dir=$config->{input_base} --input_base=$config->{input_base}");
+        push(@cmd,"--input_dir=$config->{input_dir} --input_base=$config->{input_base}");
     }
     else {
         die "Must provide either a value to either input_bam or to input_base and input_dir\n";
@@ -426,15 +504,18 @@ sub runBWA {
         die "Must provide a value for either reference or reference_list to run bwa\n";
     }
 
-    push(@cmd, $self->{output_dir});
+    push(@cmd, "--output_dir=$output_dir");
     push(@cmd, $config->{other_opts});
 
     my $cmd_string = join(' ',@cmd);
 
-    $self->_run_cmd($cmd_string);
+    # Maybe should check if this is valid.
+#    my $res = $self->_run_cmd($cmd_string);
     
-    my @files = $self->_run_cmd("find $self->{output_dir} -name '*$basename$suff'");
-    
+    my @files = split(/\n/,$self->_run_cmd("find $output_dir -name '*$basename$suff'"));
+    map {chomp $_;} @files; 
+    print STDERR join(" ",@files);
+    print STDERR "\n";
     return \@files;
 }
 
@@ -452,18 +533,199 @@ sub runBWA {
 sub bwaPostProcess {
     my ($self, $config) = @_;
 
+    my $retval;
     # Do we have both donor and host bams?
     if($config->{donor_bams} && $config->{host_bams}) {
-        $self->_bwaPostProcessDonorHostPaired($config);
+        $retval = $self->_bwaPostProcessDonorHostPaired($config);
+    }
+    
+    return $retval;
+}
+
+=head2 _bwaPostProcessDonorPaired
+
+ Title   : _bwaPostProcessDonorPaired
+ Function: Classify the results of a short read mapping (UM, UU, MM, etc.)
+ Returns : An object with counts of the different classes as well as the path to bam files 
+           containing these reads.
+ Args    : An object with donor and optionally host bam files.
+
+=cut
+sub _bwaPostProcessDonorPaired {
+    my ($self, $config) = @_;
+
+    my @donor_fh;
+    my @donor_head;
+
+    $self->{samtools_bin} = $self->{samtools_bin} ? $self->{samtools_bin} : 'samtools';
+    my $samtools = $self->{samtools_bin};
+    my $prefix = $config->{output_prefix} ? "$config->{output_prefix}_" : '';
+
+    # Open all the donor files
+    map {
+        print STDERR "Opening $_\n";
+
+        if($_ =~ /.bam$/) {
+            push(@donor_head, `$samtools view -H $_`);
+            open(my $fh, "-|", "$samtools view $_");
+            push(@donor_fh,$fh);
+        }
+        elsif($_ =~ /.sam.gz$/) {
+            push(@donor_head, `zcat $_ | $samtools view -H -S -`);
+            open(my $fh, "-|", "zcat $_ | $samtools view -S -");
+            push(@donor_fh,$fh);
+        }
+    } @{$config->{donor_bams}};
+
+    my $class_to_file_name = {
+        'lgt_donor' => "$self->{output_dir}/".$prefix."lgt_donor.bam",
+        'microbiome_donor' => "$self->{output_dir}/".$prefix."microbiome.bam"
+    };
+
+    
+    # Check if these files exist already. If they do we'll skip regenerating them.
+    my $files_exist = 1;
+
+    map {
+        if(! -e $class_to_file_name->{$_}) {
+            $files_exist = 0;
+        }
+    } keys %$class_to_file_name;
+
+    my $class_counts = {
+        'lgt' => undef,
+        'microbiome' => undef
+    };
+
+    # If the files are already there and we aren't being forced to overwrite, we'll
+    # just get the counts and return
+    if($files_exist && !$config->{overwrite}) {
+        
+        map {
+            $_ =~ /^*(.*)\_\w+$/;
+            my $class = $1;
+            if(!$class_counts->{$class}) {
+                my $count = $self->_run_cmd("$samtools view $class_to_file_name->{$_} | wc -l");
+                chomp $count;
+                $class_counts->{$class} = $count;
+                print STDERR "$count for $class\n";
+            }
+        } keys %$class_to_file_name;
+        return {
+            counts => $class_counts,
+            files => $class_to_file_name
+        };
+    }
+    # Here are a bunch of file handles we'll use later.
+    open(my $lgtd,  "| $samtools view -S -b -o $self->{output_dir}/".$prefix."lgt_donor.bam -") or die "Unable to open\n";
+    open(my $microbiome_donor,"| $samtools view -S -b -o $self->{output_dir}/".$prefix."microbiome.bam -") or die "Unable to open\n";
+
+    my $class_to_file = {
+
+    };
+
+    my $more_lines = 1;
+
+    while($more_lines) {
+        
+        my @donor_lines;
+        
+        my $dr1_line;
+        my $dr2_line;
+
+        my $obj = $self->_getPairedClass({fhs => \@donor_fh});
+        my $class = $obj->{class};
+        $more_lines = $obj->{more_lines};
+        $dr1_line = $obj->{r1_line};
+        $dr2_line = $obj->{r2_line};
+
+
+#        if($class_to_file->{$classes_both->{$paired_class}."_donor"}) {
+#            print STDERR "Printing to ".$classes_both->{$paired_class}."_donor $paired_class\n$dr1_line$dr2_line";
+#            print {$class_to_file->{$classes_both->{$paired_class}."_donor"}} "$dr1_line\n$dr2_line\n";
+#        }
+#        if($class_to_file->{$classes_both->{$paired_class}."_host"}) {
+#            print {$class_to_file->{$classes_both->{$paired_class}."_host"}} "$hr1_line\n$hr2_line\n";
+#        }
+
+#        if($classes_both->{$paired_class} eq 'lgt') {
+#            print STDERR "Processing $hr1_line$hr2_line$dr1_line$dr2_line";
+#        }
+#        if($classes_both->{$paired_class}) {
+#            $class_counts->{$classes_both->{$paired_class}}++;
+#            my @lines;
+#            map {push(@lines, "$_: $class_counts->{$_}")} keys %$class_counts;
+#            map {print  "\r$_: $class_counts->{$_}"} keys %$class_counts;
+#                   print "\r".join(' ',@lines);
+                
+                #print STDERR "Line $line_num donor class: $dclass\nHost class: $hclass\nCombined class: $paired_class\n";
+ #       }
     }
 }
 
+sub _getPairedClass {
+    my ($self, $config) = @_;
+
+    my $fhs = $config->{fhs};
+    my $more_lines = 1;
+    
+    my $r1_class;
+    my $r1_line;
+    my $r2_class;
+    my $r2_line;
+    # Next establish the class of the donor read
+    foreach my $fh (@$fhs) {
+        my $r1 = <$fh>;
+        my $r2 = <$fh>;
+        if($config->{strip_xa}) {
+            chomp $r1;
+            $r1 =~ s/\tXA:Z\S+$//;
+            chomp $r2;
+            $r2 =~ s/\tXA:Z\S+$//;
+        }  
+#                print STDERR "Processing $hr1$hr2$dr1$dr2";
+        # Should check if these ended at the same time?
+        if(!$r1 || !$r2) {
+            $more_lines = 0;
+            last;
+        }
+        
+        my $r1_flag = $self->_parseFlag((split(/\t/,$r1))[1]);
+#            my $dr2_flag = $self->_parseFlag((split(/\t/,$dr2))[1]);
+        if(!$r1_flag->{'qunmapped'}) {
+            $r1_line = $r1;
+            $r1_class = 'M';
+        }
+        elsif(!$r1_class) {
+            $r1_line = $r1;
+            $r1_class = 'U';
+        }
+        if(!$r1_flag->{'munmapped'}) {
+            $r2_line = $r2;
+            $r2_class = 'M';
+        }            
+        elsif(!$r2_class) {
+            $r2_line = $r2;
+            $r2_class = 'U';
+        }
+    }
+
+    my $class = "$r1_class$r2_class";
+
+    return {
+        class => $class,
+        r1_line => $r1_line,
+        r2_line => $r2_line,
+        more_lines => $more_lines
+    }
+}
 
 sub _bwaPostProcessDonorHostPaired {
     my ($self, $config) = @_;
 
+    $self->{samtools_bin} = $self->{samtools_bin} ? $self->{samtools_bin} : 'samtools';
     my $samtools = $self->{samtools_bin};
-
+    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     my $classes_each = {
         'MM' => 'paired',
         'UM' => 'single',
@@ -483,17 +745,75 @@ sub _bwaPostProcessDonorHostPaired {
         'MM_MU' => 'integration_site_donor',
         'MU_UU' => 'integration_site_donor',
         'UM_UU' => 'integration_site_donor',
-        'MM_UU' => 'microbiome'
+        'MM_UU' => 'microbiome',
+        'UU_MM' => 'host',
+        'UU_UU' => 'no_map',
+        'MM_MM' => 'all_map',
+        'UM_UM' => 'single_map',
+        'MU_MU' => 'single_map'
     };
 
     my $prefix = $config->{output_prefix} ? "$config->{output_prefix}_" : '';
+
+    my $class_to_file_name = {
+        'lgt_donor' => "$self->{output_dir}/".$prefix."lgt_donor.bam",
+        'lgt_host' => "$self->{output_dir}/".$prefix."lgt_host.bam",
+        'integration_site_donor_donor' => "$self->{output_dir}/".$prefix."integration_site_donor_donor.bam",
+        'integration_site_donor_host' => "$self->{output_dir}/".$prefix."integration_site_donor_host.bam",
+        'microbiome_donor' => "$self->{output_dir}/".$prefix."microbiome.bam",
+    };
+
+    
+    # Check if these files exist already. If they do we'll skip regenerating them.
+    my $files_exist = 1;
+
+    map {
+        if(! -e $class_to_file_name->{$_}) {
+            $files_exist = 0;
+        }
+    } keys %$class_to_file_name;
+
+    my $class_counts = {
+        'lgt' => undef,
+        'integration_site_host' => undef,
+        'integration_site_donor' => undef,
+        'microbiome' => undef,
+        'host' => undef,
+        'no_map' => undef,
+        'all_map' => undef,
+        'single_map' => undef
+    };
+
+    # If the files are already there and we aren't being forced to overwrite, we'll
+    # just get the counts and return
+    if($files_exist && !$config->{overwrite}) {
+        
+        map {
+            $_ =~ /^*(.*)\_\w+$/;
+            my $class = $1;
+            if(!$class_counts->{$class}) {
+                my $count = $self->_run_cmd("$samtools view $class_to_file_name->{$_} | cut -f1 | uniq | wc -l");
+                chomp $count;
+                $class_counts->{$class} = $count*1;
+                print STDERR "$count for $class\n";
+            }
+        } keys %$class_to_file_name;
+        my $total = $self->_run_cmd("$samtools view ".$config->{donor_bams}[0]." | cut -f1 | uniq | wc -l");
+        chomp $total;
+        $class_counts->{total} = $total*1;
+        return {
+            counts => $class_counts,
+            files => $class_to_file_name
+        };
+    }
     # Here are a bunch of file handles we'll use later.
-    print STDERR "$config->{output_dir}/".$prefix."lgt_donor.bam\n";
-    open(my $lgtd,  "| $samtools view -S -b -o $config->{output_dir}/".$prefix."lgt_donor.bam -") or die "Unable to open\n";
-    open(my $lgth, "| $samtools view -S -b -o $config->{output_dir}/".$prefix."lgt_host.bam -") or die "Unable to open\n";
-    open(my $int_site_donor_d, "| $samtools view -S -b -o $config->{output_dir}/".$prefix."integration_site_donor_donor.bam -") or die "Unable to open\n";
-    open(my $int_site_donor_h, "| $samtools view -S -b -o $config->{output_dir}/".$prefix."integration_site_donor_host.bam -") or die "Unable to open\n";
-    open(my $microbiome_donor,"| $samtools view -S -b -o $config->{output_dir}/".$prefix."microbiome.bam -") or die "Unable to open\n";
+    print STDERR "$self->{output_dir}/".$prefix."lgt_donor.bam\n";
+    open(my $lgtd,  "| $samtools view -S -b -o $self->{output_dir}/".$prefix."lgt_donor.bam -") or die "Unable to open\n";
+    open(my $lgth, "| $samtools view -S -b -o $self->{output_dir}/".$prefix."lgt_host.bam -") or die "Unable to open\n";
+    open(my $int_site_donor_d, "| $samtools view -S -b -o $self->{output_dir}/".$prefix."integration_site_donor_donor.bam -") or die "Unable to open\n";
+    open(my $int_site_donor_h, "| $samtools view -S -b -o $self->{output_dir}/".$prefix."integration_site_donor_host.bam -") or die "Unable to open\n";
+    open(my $microbiome_donor,"| $samtools view -S -b -o $self->{output_dir}/".$prefix."microbiome.bam -") or die "Unable to open\n";
+
 
     my $class_to_file = {
         'lgt_donor' => $lgtd,
@@ -511,19 +831,32 @@ sub _bwaPostProcessDonorHostPaired {
     # Open all the donor files
     map {
         print STDERR "Opening $_\n";
-        push(@donor_head, `$samtools view -H $_`);
-        open(my $fh, "-|", "$samtools view $_");
-        push(@donor_fh,$fh);
+
+        if($_ =~ /.bam$/) {
+            push(@donor_head, `$samtools view -H $_`);
+            open(my $fh, "-|", "$samtools view $_");
+            push(@donor_fh,$fh);
+        }
+        elsif($_ =~ /.sam.gz$/) {
+            push(@donor_head, `zcat $_ | $samtools view -H -S -`);
+            open(my $fh, "-|", "zcat $_ | $samtools view -S -");
+            push(@donor_fh,$fh);
+        }
     } @{$config->{donor_bams}};
-    
-    
     
     # Open all the host files
     map {
         print STDERR "Opening $_\n";
-        push(@host_head, `$samtools view -H $_`);
-        open(my $fh, "-|", "$samtools view $_");
-        push(@host_fh,$fh);
+        if($_ =~ /.bam$/) {
+            push(@host_head, `$samtools view -H $_`);
+            open(my $fh, "-|", "$samtools view $_");
+            push(@host_fh,$fh);
+        }
+        elsif($_ =~ /.sam.gz$/) {
+            push(@host_head, `zcat $_ | $samtools view -H -S -`);
+            open(my $fh, "-|", "zcat $_ | $samtools view -S -");
+            push(@host_fh,$fh);
+        }
     } @{$config->{host_bams}};
 
 
@@ -545,116 +878,48 @@ sub _bwaPostProcessDonorHostPaired {
 
     my $line_num =0;
 
-    my $class_counts = {
-        'lgt' => 0,
-        'integration_site_host' => 0,
-        'integration_site_donor' => 0,
-        'microbiome' => 0
-    };
-
     while($more_lines) {
         
         my @donor_lines;
         my @host_lines;
         
-        my $hr1_class;
-        my $hr2_class;
-        my $hr1_line;
-        my $hr2_line;
+        # Get the class of the host mappings
+        my $obj = $self->_getPairedClass({fhs => \@host_fh});
+        my $hclass = $obj->{class};
+        $more_lines = $obj->{more_lines};
+        my $hr1_line = $obj->{r1_line};
+        my $hr2_line = $obj->{r2_line};
 
-        # First establish the class of the host reads.
-        foreach my $hfh (@host_fh) {
-            my $hr1 = <$hfh>;
-            my $hr2 = <$hfh>;            
+        # Get the class of the donor mappings
+        my $obj = $self->_getPairedClass({fhs => \@donor_fh});
+        my $dclass = $obj->{class};
+        $more_lines = $obj->{more_lines};
+        my $dr1_line = $obj->{r1_line};
+        my $dr2_line = $obj->{r2_line};
+
+        if($more_lines) {
+            my $paired_class = "$dclass\_$hclass";
+
+            # print the donor lines to the donor file (if we are keeping this output file)
+            if($class_to_file->{$classes_both->{$paired_class}."_donor"}) {
+                print {$class_to_file->{$classes_both->{$paired_class}."_donor"}} "$dr1_line\n$dr2_line\n";
+            }
             
-            # Should check if these ended at the same time?
-            if(!$hr1 || !$hr2 || $more_lines == 0) {
-                $more_lines = 0;
-                last;
+            # print the host lines to the host file (if we are keeping this output file)
+            if($class_to_file->{$classes_both->{$paired_class}."_host"}) {
+                print {$class_to_file->{$classes_both->{$paired_class}."_host"}} "$hr1_line\n$hr2_line\n";
             }
-            my $hr1_flag = $self->_parseFlag((split(/\t/,$hr1))[1]);
- #           my $hr2_flag = $self->_parseFlag((split(/\t/,$hr2))[1]);
-            if(!$hr1_flag->{'qunmapped'}) {
-                $hr1_line = $hr1;
-                $hr1_class = 'M';
+            
+            # Increment the count for this class
+            if($classes_both->{$paired_class}) {
+                $class_counts->{$classes_both->{$paired_class}}++;
             }
-            elsif(!$hr1_class) {
-                $hr1_line = $hr1;
-                $hr1_class = 'U';
-            }
-            if(!$hr1_flag->{'munmapped'}) {
-                $hr2_line = $hr2;
-                $hr2_class = 'M';
-            }
-            elsif(!$hr2_class) {
-                $hr2_line = $hr2;
-                $hr2_class = 'U';
-            }
+            # Increment the total count
+            $line_num ++;
         }
-
-        my $dr1_class;
-        my $dr2_class;
-        my $dr1_line;
-        my $dr2_line;
-
-        # Next establish the class of the donor read
-        foreach my $dfh (@donor_fh) {
-            my $dr1 = <$dfh>;
-            my $dr2 = <$dfh>;
-#                print STDERR "Processing $hr1$hr2$dr1$dr2";
-            # Should check if these ended at the same time?
-            if(!$dr1 || !$dr2) {
-                $more_lines = 0;
-                last;
-            }
-
-            my $dr1_flag = $self->_parseFlag((split(/\t/,$dr1))[1]);
-#            my $dr2_flag = $self->_parseFlag((split(/\t/,$dr2))[1]);
-            if(!$dr1_flag->{'qunmapped'}) {
-                $dr1_line = $dr1;
-                $dr1_class = 'M';
-            }
-            elsif(!$dr1_class) {
-                $dr1_line = $dr1;
-                $dr1_class = 'U';
-            }
-            if(!$dr1_flag->{'munmapped'}) {
-                $dr2_line = $dr2;
-                $dr2_class = 'M';
-            }            
-            elsif(!$dr2_class) {
-                $dr2_line = $dr2;
-                $dr2_class = 'U';
-            }
-        }
-
-        my $dclass = "$dr1_class$dr2_class";
-        my $hclass = "$hr1_class$hr2_class";
-        my $paired_class = "$dclass\_$hclass";
-        
-        if($class_to_file->{$classes_both->{$paired_class}."_donor"}) {
-            print STDERR "Printing to ".$classes_both->{$paired_class}."_donor $paired_class\n$dr1_line$dr2_line";
-            print {$class_to_file->{$classes_both->{$paired_class}."_donor"}} "$dr1_line$dr2_line";
-        }
-        if($class_to_file->{$classes_both->{$paired_class}."_host"}) {
-            print {$class_to_file->{$classes_both->{$paired_class}."_host"}} "$hr1_line$hr2_line";
-        }
-
-        if($classes_both->{$paired_class} eq 'lgt') {
-#            print STDERR "Processing $hr1_line$hr2_line$dr1_line$dr2_line";
-        }
-        if($classes_both->{$paired_class}) {
-            $class_counts->{$classes_both->{$paired_class}}++;
-            my @lines;
-#            map {push(@lines, "$_: $class_counts->{$_}")} keys %$class_counts;
-#            map {print  "\r$_: $class_counts->{$_}"} keys %$class_counts;
-#                   print "\r".join(' ',@lines);
-                
-                #print STDERR "Line $line_num donor class: $dclass\nHost class: $hclass\nCombined class: $paired_class\n";
-        }
-        $line_num ++;
     }
 
+    # Close up the file handles
     map {
         if($_ =~ /_donor$/) {
             print STDERR "closing $_ donor file\n";
@@ -665,6 +930,119 @@ sub _bwaPostProcessDonorHostPaired {
             close $class_to_file->{$_};
         }
     }keys %$class_to_file;
+
+    # Set the total
+    $class_counts->{total} = $line_num;
+
+    # Return the files and the counts
+    return {
+        counts => $class_counts,
+        files => $class_to_file_name
+    };
+}
+
+=head2 bestBlast
+
+ Title   : bestBlast
+ Usage   : $lgtseek->bestBlast(({'inputs' => \@bam_files, 'ref' => '/path/to/ref/db'})
+ Function: Run blast (or megablast) against a reference database to find best blast hits. Then
+           determine if mates look like valid LGT's
+ Returns : A file with all the LGT's hit information
+ Args    : An object with the input bame files and the reference database.
+
+=cut
+sub bestBlast {
+    my ($self,$config) = @_;
+    
+    my @fastas;
+    # Convert bams to fasta
+    if($config->{'bams'}) {
+    
+    }    
+    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+
+    if($config->{'fastas'}) {
+        push(@fastas,@{$config->{'fastas'}});
+    }
+    my $blast_bin = '';
+    if($config->{blast_bin}) {
+        $blast_bin = $config->{"blast_bin"}." -d $config->{'blast_db'} -e 1 -m8 -T F ";
+    }        
+    my @overall_files;
+    my @lineage1_files;
+    my @lineage2_files;
+    foreach my $fasta (@fastas) {
+        
+        my $cmd = "perl -I $self->{bin_dir} $self->{bin_dir}/filter_lgt_best_hit.pl".
+        " --input=$fasta".
+        " --blast_bin=\'$blast_bin\'".
+        " --taxon_dir=".$self->{taxon_dir}.
+        " --trace_mapping=".$config->{trace_mapping}.
+        " --lineage1=".$config->{lineage1}.
+        " --lineage2=".$config->{lineage2}.
+        " --filter_lineage=".$config->{filter_lineage}.
+        " --dbhost=".$self->{taxon_host}.
+        " --idx_dir=".$self->{taxon_idx_dir}.
+        " --output_dir=".$self->{output_dir};
+        
+        
+        $self->_run_cmd($cmd);
+        my ($name,$directories,$suffix) = fileparse($fasta,qr/\.[^.]*/);
+        
+        push(@overall_files,"$self->{output_dir}/$name\_overall.out");
+        push(@lineage1_files,"$self->{output_dir}/$name\_lineage1.out");
+        push(@lineage2_files,"$self->{output_dir}/$name\_lineage2.out");
+    }
+    
+    # Should merge the three file types here.
+    my $cmd = "cat ".join(' ',@overall_files)." > $self->{output_dir}/all_overall.out";
+    $self->_run_cmd($cmd);
+    my $cmd = "cat ".join(' ',@lineage1_files)." > $self->{output_dir}/all_lineage1.out";
+    $self->_run_cmd($cmd);
+    my $cmd = "cat ".join(' ',@lineage2_files)." > $self->{output_dir}/all_lineage2.out";
+    $self->_run_cmd($cmd);
+
+    open OUT, ">$self->{output_dir}/filtered_blast.list" or die "Unable to open $self->{output_dir}/filtered_blast.list\n";
+    print OUT "$self->{output_dir}/all_overall.out\n$self->{output_dir}/all_lineage1.out\n$self->{output_dir}/all_lineage2.out";
+    close OUT;
+
+    return {
+        overall_blast => "$self->{output_dir}/all_overall.out",
+        lineage1_blast => "$self->{output_dir}/all_lineage1.out",
+        lineage2_blast => "$self->{output_dir}/all_lineage2.out",
+        list_file => "$self->{output_dir}/filtered_blast.list"
+    };
+}
+
+=head2 bestBlast
+
+ Title   : bestBlast
+ Usage   : $lgtseek->runLgtFinder(({'inputs' => \@files})
+ Function: Run blast (or megablast) against a reference database to find best blast hits. Then
+           determine if mates look like valid LGT's
+ Returns : A file with all the LGT's hit information
+ Args    : An object with the input bame files and the reference database.
+
+=cut
+sub runLgtFinder {
+    my ($self,$config) = @_;
+
+    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+
+    my $cmd = "perl $self->{bin_dir}/lgt_finder_dr.pl".
+        " --input_file_list=$config->{input_file_list}".
+        " --output_prefix=$config->{output_prefix}".
+        " --output_dir=$self->{output_dir}".
+        " --ref_lineage=$config->{ref_lineage}";
+        
+    $self->_run_cmd($cmd);
+
+    my $pref = $config->{output_prefix} ? $config->{output_prefix} : 'lgt_finder';
+
+
+    my $valid_count = $self->_run_cmd("grep ';$config->{lineage1};' $self->{output_dir}/$pref\_by_clone.txt | grep ';$config->{lineage2};' | wc -l");
+    chomp $valid_count;
+    return $valid_count;
 }
 
 sub _dec2bin {
@@ -698,5 +1076,4 @@ sub _parseFlag {
         'pcrdup' => substr($final_bin, 10, 1)
     };
 }
-
 1;
