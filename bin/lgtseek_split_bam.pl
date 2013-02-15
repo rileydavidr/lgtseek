@@ -45,7 +45,7 @@ my $sra_dir = $options{sra_dir} ? $options{sra_dir} : '/usr/local/packages/srato
 
 my $ergatis_dir = $options{ergatis_dir} ? $options{ergatis_dir} :'/local/projects/ergatis/package-driley/bin/';
 
-my $samtools_bin = $options{samtools_bin} ? $optinos{samtools_bin} : 'samtools';
+my $samtools_bin = $options{samtools_bin} ? $options{samtools_bin} : 'samtools';
 
 # Create an lgtseek object
 my $lgtseek = LGTSeek->new({
