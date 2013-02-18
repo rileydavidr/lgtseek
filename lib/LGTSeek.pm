@@ -416,10 +416,10 @@ sub dumpFastq {
 
     $config->{sra_file} =~ s/\/\//\//g;
     # Need to pull the version of the sratoolkit to determine if we need the --split-3 parameter.
-    my $ret = `$fastqdump_bin -V`;
+    my $ret = `$fastqdump_bin`;
     my $version;
     my $cutoff_version;
-    if($ret =~ /fastq-dump : ([\d.]+)/) {
+    if($ret =~ /fastq-dump : ([\d\.]+)/ || $ret =~ /Version: ([\d\.]+)/) {
         $version = version->parse($1);
         $cutoff_version = version->parse('2.1.0');
     }
