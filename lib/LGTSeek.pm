@@ -28,6 +28,8 @@ use version;
 use File::Basename;
 # Dependencies
 use GiTaxon;
+use LGTBestBlast;
+
 $| = 1;
 
 =head2 new
@@ -113,9 +115,9 @@ sub prinseqFilterBam {
     
     # Override if it is provided
     $self->{prinseq_bin} = $config->{prinseq_bin} ? $config->{prinseq_bin} :$self->{prinseq_bin};
-
+    $self->{samtools_bin} = $self->{samtools_bin} ? $self->{samtools_bin} : 'samtools';
     if($config->{output_dir}) {
-        $self->_run_cmd("mkdir $config->{output_dir}");
+        $self->_run_cmd("mkdir -p $config->{output_dir}");
     }
     
     if(!$self->{ergatis_bin} || !$self->{prinseq_bin}) {
@@ -152,6 +154,7 @@ sub _prinseqFilterPaired {
 
     my $bin = $self->{ergatis_bin};
     my $prinseq_bin = $self->{prinseq_bin};
+
     my $samtools = $self->{samtools_bin};
 
     # Generate concatenated fastq files for prinseq derep filtering
@@ -176,18 +179,29 @@ sub _prinseqFilterPaired {
     my $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_1.fastq --out_good=$output_dir/$name\_lc_1_good --out_bad=$output_dir/$name\_lc_1_bad -lc_method dust -lc_threshold 7";
     $self->_run_cmd($cmd);
 
-    # Pull out bad ids
-    my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_1_bad.fastq > $output_dir/$name\_lc_1_bad_ids.out";
-    $self->_run_cmd($cmd);
-
+    if( -e "$output_dir/$name\_lc_1_bad.fastq") {
+        # Pull out bad ids
+        my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_1_bad.fastq > $output_dir/$name\_lc_1_bad_ids.out";
+        $self->_run_cmd($cmd);
+    }
+    else {
+        print STDERR "Didn't find any low complexity sequences in read 1\n";
+        $self->_run_cmd("touch $output_dir/$name\_lc_1_bad_ids.out");
+    }
 
     # Run prinseq for low complexity filtering
     my $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_2.fastq --out_good=$output_dir/$name\_lc_2_good --out_bad=$output_dir/$name\_lc_2_bad -lc_method dust -lc_threshold 7";
     $self->_run_cmd($cmd);
 
     # Pull out bad ids
-    my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_2_bad.fastq > $output_dir/$name\_lc_2_bad_ids.out";
-    $self->_run_cmd($cmd);
+    if( -e "$output_dir/$name\_lc_2_bad.fastq") {
+        my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_2_bad.fastq > $output_dir/$name\_lc_2_bad_ids.out";
+        $self->_run_cmd($cmd);
+    }
+    else {
+        print STDERR "Didn't find any low complexity sequences in read 2\n";
+        $self->_run_cmd("touch $output_dir/$name\_lc_2_bad_ids.out");
+    }
 
     # Merge bad ids from derep and lc filtering
     my $cmd = "cat $output_dir/$name\_derep_bad_ids.out $output_dir/$name\_lc_1_bad_ids.out $output_dir/$name\_lc_2_bad_ids.out | sort -u > $output_dir/$name\_bad_ids.out";
@@ -204,6 +218,10 @@ sub _prinseqFilterPaired {
 
     my $count = $self->_run_cmd("$samtools view $output_dir/$name\_filtered.bam | cut -f1 | uniq | wc -l");
     chomp $count;
+
+    # Blitz the sam file
+    $self->_run_cmd("rm $output_dir/$name\_filtered.sam");
+
 #    my $cmd = "perl $bin/sam2fasta.pl --input=$output_dir/$name\_filtered.bam --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
 #    $self->_run_cmd($cmd);
 #    `rm $output_dir/$name\_filtered.sam`; 
@@ -227,15 +245,17 @@ sub sam2Fasta {
     my($self, $config) = @_;
     my $bin = $self->{ergatis_bin};
 
+    my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+
     my $outfile;
     my($name,$path,$suff) = fileparse($config->{input},(qr/.bam$||.sam$||.sam.gz$/));
     my $cmd = "perl $bin/sam2fasta.pl --input=$config->{input}";
     if($config->{fastq}) {
-        $outfile = "$self->{output_dir}/$name.fastq";
+        $outfile = "$output_dir/$name.fastq";
         $cmd .= " --fastq=1 --output_file=$outfile";
     }
     else {
-        $outfile = "$self->{output_dir}/$name.fasta";
+        $outfile = "$output_dir/$name.fasta";
         $cmd .= " --fastq=0 --output_file=$outfile";
     }
     if($config->{combine_mates}) {
@@ -351,7 +371,7 @@ sub downloadSRA {
     while($retry) {
         
         # Doing this echo y to ensure we accept any certs.
-        my $out = '';#`echo y | $cmd_string`;
+        my $out = $self->_run_cmd("echo y | $cmd_string");
 
         # We can actually exit non-0 and still succeed if the 
         if($out =~ /Error/)  {
@@ -417,7 +437,7 @@ sub dumpFastq {
 
     my ($name,$path,$suff) = fileparse($config->{sra_file},'.sra');
     my $cmd = "$fastqdump_bin -O $self->{output_dir} $config->{sra_file}";
-    #$self->_run_cmd($cmd);
+    $self->_run_cmd($cmd);
 
     chomp $name;
     my $res = $self->_run_cmd("find $self->{output_dir} -name '$name*.fastq'");
@@ -461,7 +481,7 @@ sub dumpFastq {
 sub runBWA {
     my($self,$config) = @_;
 
-    $self->{bin_dir} = $config->{bin_dir} ? $config->{bin_dir} : $self->{bin_dir};
+    $self->{ergatis_dir} = $config->{ergatis_dir} ? $config->{ergatis_dir} : $self->{ergatis_dir};
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     # Check for a bwa path. If we don't have one we'll just hope it's in our global path.
     $self->{bwa_path} = $config->{bwa_path} ? $config->{bwa_path} : $self->{bwa_path};
@@ -470,7 +490,7 @@ sub runBWA {
     $self->_run_cmd("mkdir -p $output_dir");
 
     # Build the command string;
-    my @cmd = ("$self->{bin_dir}/lgt_bwa --num_aligns=0 --bwa_path=$self->{bwa_path}");
+    my @cmd = ("$self->{ergatis_dir}/lgt_bwa --num_aligns=0 --bwa_path=$self->{bwa_path}");
 
     my $suff = '.sam';
     if($config->{output_bam}) {
@@ -510,7 +530,7 @@ sub runBWA {
     my $cmd_string = join(' ',@cmd);
 
     # Maybe should check if this is valid.
-#    my $res = $self->_run_cmd($cmd_string);
+    my $res = $self->_run_cmd($cmd_string);
     
     my @files = split(/\n/,$self->_run_cmd("find $output_dir -name '*$basename$suff'"));
     map {chomp $_;} @files; 
@@ -941,6 +961,193 @@ sub _bwaPostProcessDonorHostPaired {
     };
 }
 
+sub blast2lca {
+    my ($self,$config) = @_;
+
+    my $gi2tax = $self->getGiTaxon({});
+
+    open IN, "<$config->{blast}" or die "Unable to open $config->{blast}\n";
+    my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    
+    my ($name,$directories,$suffix) = fileparse($config->{blast},qr/\.[^.]*/);
+    open OUT, ">$output_dir/$name\_lca.out" or die "Unable to open $output_dir/$name\_lca.out";
+    print OUT join("\t", ('read_id','best_evalue','lca','paired_lca','liberal_lca'));
+    print OUT "\n";
+    my $hits_by_readname = {};
+    my $id;
+    my $evalue;
+    my $lca;
+
+    my @vals;
+    while (<IN>) {
+        my @fields = split(/\t/);
+        my $new_id = $fields[0];
+        if($fields[0] =~ /^(.*)\/\d/) {
+            $new_id = $1;
+        }
+        if($new_id eq $id && $fields[10] > $evalue) {
+            next;
+        }
+        my $taxon =  $gi2tax->getTaxon($fields[1]);
+        $taxon->{scientific_name} =~ /^(\w+) /;
+        my $genera = $1;
+
+
+#        if(&filter_genera($genera)) {
+#            next;
+#        }
+        if(!defined($id)) {
+            $id = $new_id;
+            $evalue = $fields[10];
+            $lca = $taxon->{lineage};
+            $hits_by_readname->{$fields[0]} = {$taxon->{taxon_id}} => $taxon->{lineage};
+        }elsif($new_id eq $id && $fields[10] == $evalue) {
+            $hits_by_readname->{$fields[0]}->{$taxon->{taxon_id}} = $taxon->{lineage};
+            my $newlca = &_find_lca([$lca, $taxon->{lineage}]);
+            $lca = $newlca;
+        }
+        elsif($new_id ne $id) {
+
+            @vals = ($id,$evalue,$lca);
+            my $newvals = &_prep_lca_print($hits_by_readname,\@vals);
+            
+
+            print OUT join("\t",@$newvals);
+            print OUT "\n";
+            $id = $new_id;
+            $evalue = $fields[10];
+            $lca = $taxon->{lineage};
+        }
+    }
+    # Print out last line
+
+    @vals = ($id,$evalue,$lca);
+    my $newvals = &_prep_lca_print($hits_by_readname,\@vals);
+    print OUT join("\t",@$newvals);
+    print OUT "\n";
+    return "$output_dir/$name\_lca.out";
+}
+
+sub _prep_lca_print {
+    my $hits_by_readname = shift;
+    my $vals = shift;
+    # Find the LCA of only mated hits
+    my @reads = keys %$hits_by_readname;
+    if(scalar @reads > 1) {
+        
+        
+        # First we'll find the LCA requiring both reads to match the same
+        # taxon id.
+        my @good_lineages;
+        my @read1_lineages;
+        map {
+            if($hits_by_readname->{$reads[1]}->{$_}) {
+                push(@good_lineages,$hits_by_readname->{$reads[1]}->{$_});
+            }
+            push(@read1_lineages,$hits_by_readname->{$reads[0]}->{$_});
+        }keys %{$hits_by_readname->{$reads[0]}};
+        
+        my @read2_lineages;
+        map {
+            push(@read2_lineages,$hits_by_readname->{$reads[1]}->{$_});
+        }keys %{$hits_by_readname->{$reads[1]}};
+        my $paired_lca = &_find_lca(\@good_lineages);
+        push(@$vals,$paired_lca);
+        
+        # Next we'll find the LCA where if either LCA is a substring of the
+        # other we'll take the longer one (more specific).
+        my $read1_lca = &_find_lca(\@read1_lineages);
+        my $read2_lca = &_find_lca(\@read2_lineages);
+        
+        my $liberal_lca = &_find_lca([$read1_lca,$read2_lca]);
+
+        if($read1_lca =~ $read2_lca) {
+            $liberal_lca = $read2_lca;
+        }
+        elsif($read2_lca =~ $read1_lca) {
+            $liberal_lca = $read1_lca;
+        }
+
+        push(@$vals,$liberal_lca);
+        $hits_by_readname = {};
+    }
+    else {
+        push(@$vals,('',''));
+    }
+    return $vals;
+}
+
+
+sub _find_lca {
+    my $lineages = shift;
+
+    # prime it
+    my @lca = split(';', $lineages->[0]);
+
+    foreach my $l (@$lineages) {
+        my $newlca = [];
+        my @lineage = split(';',$l);
+        for( my $i = 0; $i < @lineage;$i++) {
+            if($lca[$i] eq $lineage[$i]) {
+                push(@$newlca, $lineage[$i]);
+            }
+            else {
+                last;
+            }   
+        }
+        @lca = @$newlca;
+    }
+    if(! scalar @lca) {
+#        print STDERR "Had no lca @$lineages\n";
+    }
+    #print STDERR join(";",@lca);
+    #print STDERR "\n";
+    return join(';',@lca);
+}
+
+sub bestBlast2 {
+    my ($self,$config) = @_;
+    my $fasta;
+    # Convert bams to fasta
+    if($config->{'bam'}) {
+        my $newfasta = $self->sam2Fasta({
+            input => $config->{'bam'},
+            output_dir => $config->{output_dir},
+            paired => 1});
+        $fasta = $newfasta;
+    }
+    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+
+    if($config->{'fasta'}) {
+        $fasta = $config->{fasta};
+    }
+    my $blast_bin = '';
+    if($config->{blast_bin}) {
+        $blast_bin = $config->{"blast_bin"}." -d $config->{'blast_db'} -e 1e-5 -m8 -T F ";
+    }  
+
+    my ($name,$directories,$suffix) = fileparse($fasta,qr/\.[^.]*/);
+    open OUT, ">$self->{output_dir}/$name\_filtered_blast.list" or die "Unable to open $self->{output_dir}/$name\_filtered_blast.list\n";  
+    my @outputs;
+#    foreach my $file (@fastas) {
+        my $files = LGTBestBlast::filterBlast({
+            fasta => $fasta,
+            db => $config->{db},
+            gitaxon => $self->getGiTaxon({}),
+            lineage1 => $config->{lineage1},
+            lineage2 => $config->{lineage2},
+            output_dir => "$self->{output_dir}"});
+        map {
+            print OUT "$files->{$_}\n";
+        } keys %$files;
+
+#        push(@outputs,$files);
+ #   }
+    close OUT;
+
+    $files->{list_file} = "$self->{output_dir}/$name\_filtered_blast.list";
+    return $files;
+}
 =head2 bestBlast
 
  Title   : bestBlast
@@ -1029,7 +1236,7 @@ sub runLgtFinder {
 
     $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
 
-    my $cmd = "perl $self->{bin_dir}/lgt_finder_dr.pl".
+    my $cmd = "perl $self->{ergatis_dir}/lgt_finder_dr.pl".
         " --input_file_list=$config->{input_file_list}".
         " --output_prefix=$config->{output_prefix}".
         " --output_dir=$self->{output_dir}".
@@ -1041,8 +1248,88 @@ sub runLgtFinder {
 
 
     my $valid_count = $self->_run_cmd("grep ';$config->{lineage1};' $self->{output_dir}/$pref\_by_clone.txt | grep ';$config->{lineage2};' | wc -l");
+    my $valid_int_count = $self->_run_cmd("wc -l $self->{output_dir}/$pref\_by_trace.txt");
     chomp $valid_count;
-    return $valid_count;
+    chomp $valid_int_count;
+    return {valid_clones => $valid_count,
+            valid_traces => $valid_int_count
+    };
+}
+
+=head2 splitBam
+
+ Title   : splitBam
+ Usage   : $lgtseek->splitBam(({'input' => $file})
+ Function: Split a bam file into smaller chunks.
+ Returns : A list of the bam files split up
+ Args    : An object with the input bam files.
+
+=cut
+sub splitBam {
+    my ($self,$config) = @_;
+
+    my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    my $seqs_per_file = $config->{seqs_per_file} ? $config->{seqs_per_file} : 10000;
+
+    my $samtools = $self->{samtools_bin};
+
+    # Parse out the pieces of the filename
+    my($fn,$path,$suffix) = fileparse($config->{input},'.bam');
+
+    # Pull out the header
+    my $header = $self->_run_cmd("$samtools view -H $config->{input}");
+
+    # Open the input file
+    open(IN, "-|", "$samtools view $config->{input}");
+
+    # Open the first output file
+    my $count = 0;
+    my $ofile = "$output_dir/$fn\_$count.bam";
+    open(my $ofh, "| samtools view -S -b -o $ofile -");
+    my @outfiles = ($ofile);
+
+    # Print the header
+    print $ofh $header;
+    
+    my $i = 0;
+    while(my $line = <IN>) {
+        my @fields = split(/\t/,$line);
+        my $flag = &parseFlag($fields[1]);
+
+        # Strip out the XA tag
+        $line =~ s/\s+XA:Z:\S+//;
+
+        # Make sure we don't accidentally split read pairs.
+        if($flag->{'last'} && $i >= $seqs_per_file) {
+
+            # Print out the line
+            print $ofh $line;
+
+            # Close the old file
+            close $ofh;
+            
+            # Open the new file
+            $count ++;
+            $ofile = "$output_dir/$fn\_$count.bam";
+            open($ofh, "| samtools view -S -b -o $ofile -");
+            push(@outfiles,$ofile);
+
+            # Print the header to the new file
+            print $ofh $header;
+            
+            # Reset the counter
+            $i = 0;
+        }
+
+        # If we haven't filled the current file yet just keep printing.
+        else {
+            print $ofh $line;
+        }
+
+        # Increment the counter
+        $i++;
+    }
+    close $ofh;
 }
 
 sub _dec2bin {
