@@ -489,8 +489,9 @@ sub runBWA {
 
     $self->_run_cmd("mkdir -p $output_dir");
 
+    my $threads = $config->{threads} ? $config->{threads} : 1;
     # Build the command string;
-    my @cmd = ("$self->{ergatis_bin}/lgt_bwa --num_aligns=0 --bwa_path=$self->{bwa_path}");
+    my @cmd = ("$self->{ergatis_bin}/lgt_bwa --threads=$threads --num_aligns=0 --bwa_path=$self->{bwa_path}");
 
     my $suff = '.sam';
     if($config->{output_bam}) {

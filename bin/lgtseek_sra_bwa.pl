@@ -42,6 +42,7 @@ my $results = GetOptions (\%options,
                           'aspera_dir=s',
                           'ergatis_dir=s',
                           'prinseq_bin=s',
+                          'threads=s',
                           'help|h'
                           );
 
@@ -58,6 +59,8 @@ my $ergatis_dir = $options{ergatis_dir} ? $options{ergatis_dir} :'/local/project
 my $prinseq_bin = $options{prinseq_bin} ? $options{prinseq_bin} : 'prinseq-lite.pl';
 
 my $samtools_bin = $options{samtools_bin} ? $options{samtools_bin} : 'samtools';
+
+my $threads = $options{threads} ? $options{threads} : 1;
 
 # Create an lgtseek object
 my $lgtseek = LGTSeek->new({
@@ -91,11 +94,13 @@ foreach my $file (@$sra_files) {
         next;
     }
     
+
     # Align to the donors.
     my $donor_bams = $lgtseek->runBWA(
         {input_dir => $fastq_info->{path},
          input_base => $fastq_info->{basename},
          output_bam => 1,
+         threads => $threads,
          output_dir => "$options{output_dir}/donor_alignments/",
          reference => join(',',@donor_refs)
         });
@@ -105,6 +110,7 @@ foreach my $file (@$sra_files) {
     my $host_bams = $lgtseek->runBWA(
         {input_dir => $fastq_info->{path},
          input_base => $fastq_info->{basename},
+         threads => $threads,
          output_dir => "$options{output_dir}/host_alignments/",
          output_bam => 1,
          reference => join(',',@host_refs)
