@@ -49,7 +49,7 @@ my $results = GetOptions (\%options,
 # Take care of the inputs
 my $bin_dir = $options{bin_dir} ? $options{bin_dir} : '/local/projects/ergatis/package-driley/bin/';
 
-my $sra_dir = $options{sra_dir} ? $options{sra_dir} : '/usr/local/packages/sratoolkit.2.1.8/';
+my $sra_dir = $options{sratools_dir} ? $options{sratools_dir} : '/usr/local/packages/sratoolkit.2.1.8/';
 
 my $aspera_dir = $options{aspera_dir} ? $options{aspera_dir} : '/home/driley/.aspera/connect/';
     
