@@ -142,3 +142,13 @@ foreach my $file (@$sra_files) {
     &print_tab("$options{output_dir}/$name\_post_processing.tab",\@header,\@vals);
 
 }
+
+sub print_tab {
+    my ($file,$header,$vals) = @_;
+    open OUT, ">$file" or die "Couldn't open $file\n";
+    print OUT join("\t",@$header);
+    print OUT "\n";
+    print OUT join("\t",@$vals);
+    print OUT "\n";
+}
+
