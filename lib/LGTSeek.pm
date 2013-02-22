@@ -481,7 +481,7 @@ sub dumpFastq {
 sub runBWA {
     my($self,$config) = @_;
 
-    $self->{ergatis_dir} = $config->{ergatis_dir} ? $config->{ergatis_dir} : $self->{ergatis_dir};
+    $self->{ergatis_bin} = $config->{ergatis_bin} ? $config->{ergatis_bin} : $self->{ergatis_bin};
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     # Check for a bwa path. If we don't have one we'll just hope it's in our global path.
     $self->{bwa_path} = $config->{bwa_path} ? $config->{bwa_path} : $self->{bwa_path};
@@ -490,7 +490,7 @@ sub runBWA {
     $self->_run_cmd("mkdir -p $output_dir");
 
     # Build the command string;
-    my @cmd = ("$self->{ergatis_dir}/lgt_bwa --num_aligns=0 --bwa_path=$self->{bwa_path}");
+    my @cmd = ("$self->{ergatis_bin}/lgt_bwa --num_aligns=0 --bwa_path=$self->{bwa_path}");
 
     my $suff = '.sam';
     if($config->{output_bam}) {
@@ -1236,7 +1236,7 @@ sub runLgtFinder {
 
     $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
 
-    my $cmd = "perl $self->{ergatis_dir}/lgt_finder_dr.pl".
+    my $cmd = "perl $self->{ergatis_bin}/lgt_finder_dr.pl".
         " --input_file_list=$config->{input_file_list}".
         " --output_prefix=$config->{output_prefix}".
         " --output_dir=$self->{output_dir}".
