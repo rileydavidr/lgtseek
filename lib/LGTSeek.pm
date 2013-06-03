@@ -29,7 +29,9 @@ use File::Basename;
 # Dependencies
 use GiTaxon;
 use LGTBestBlast;
-
+use LGTFinder;
+use LGTbwa;
+use LGTsam2lca;
 $| = 1;
 
 =head2 new
@@ -416,10 +418,10 @@ sub dumpFastq {
 
     $config->{sra_file} =~ s/\/\//\//g;
     # Need to pull the version of the sratoolkit to determine if we need the --split-3 parameter.
-    my $ret = `$fastqdump_bin`;
+    my $ret = `$fastqdump_bin -V`;
     my $version;
     my $cutoff_version;
-    if($ret =~ /fastq-dump : ([\d\.]+)/ || $ret =~ /Version: ([\d\.]+)/) {
+    if($ret =~ /fastq-dump : ([\d.]+)/) {
         $version = version->parse($1);
         $cutoff_version = version->parse('2.1.0');
     }
@@ -436,12 +438,16 @@ sub dumpFastq {
     }
 
     my ($name,$path,$suff) = fileparse($config->{sra_file},'.sra');
-    my $cmd = "$fastqdump_bin -O $self->{output_dir} $config->{sra_file}";
-    $self->_run_cmd($cmd);
-
     chomp $name;
-    my $res = $self->_run_cmd("find $self->{output_dir} -name '$name*.fastq'");
+    my $res = $self->_run_cmd("find $self->{output_dir} -maxdepth 1 -name '$name*.fastq'");
     my @files = split(/\n/,$res);
+
+    if(!@files && !$config->{overwrite}) {
+        my $cmd = "$fastqdump_bin -O $self->{output_dir} $config->{sra_file}";
+        $self->_run_cmd($cmd);
+        my $res = $self->_run_cmd("find $self->{output_dir} -maxdepth 1 -name '$name*.fastq'");
+        @files = split(/\n/,$res);
+    }
 
     print STDERR "@files\n";
 
@@ -486,17 +492,24 @@ sub runBWA {
     # Check for a bwa path. If we don't have one we'll just hope it's in our global path.
     $self->{bwa_path} = $config->{bwa_path} ? $config->{bwa_path} : $self->{bwa_path};
     $self->{bwa_path} = $self->{bwa_path} ? $self->{bwa_path} : 'bwa';
-
+    
     $self->_run_cmd("mkdir -p $output_dir");
 
-    my $threads = $config->{threads} ? $config->{threads} : 1;
+    my $conf = {
+        num_aligns => 0,
+        bwa_path => $self->{bwa_path},
+        output_dir => $output_dir
+    };
+
+
     # Build the command string;
-    my @cmd = ("$self->{ergatis_bin}/lgt_bwa --threads=$threads --num_aligns=0 --bwa_path=$self->{bwa_path}");
+    my @cmd = ("$self->{ergatis_dir}/lgt_bwa --num_aligns=0 --bwa_path=$self->{bwa_path}");
 
     my $suff = '.sam';
     if($config->{output_bam}) {
         $suff = '.bam';
-        push(@cmd, '--output_bam=1');
+        $conf->{output_bam} = 1;
+#        push(@cmd, '--output_bam=1');
     }
 
     my $basename = $config->{input_base};
@@ -505,39 +518,59 @@ sub runBWA {
     if($config->{input_bam}) {
         my ($name,$path,$suff) = fileparse($config->{input_bam},'.bam');
         $basename = $name;
-        
-        push(@cmd,"--input_bam=$config->{input_bam}");
+        $conf->{input_bam} = $config->{input_bam};
+#        push(@cmd,"--input_bam=$config->{input_bam}");
     }
     elsif($config->{input_dir} && $config->{input_base}) {
-        push(@cmd,"--input_dir=$config->{input_dir} --input_base=$config->{input_base}");
+        $conf->{input_dir} = $config->{input_dir};
+        $conf->{input_base} = $config->{input_base};
+#        push(@cmd,"--input_dir=$config->{input_dir} --input_base=$config->{input_base}");
     }
     else {
         die "Must provide either a value to either input_bam or to input_base and input_dir\n";
     }
 
+    my $pre = '';
     if($config->{reference}) {
-        push(@cmd,"--ref_file=$config->{reference}");
+        my ($name,$dir,$suff) = fileparse($config->{reference},qr/\.[^\.]+/);
+        $pre = "$name\_";
+        $conf->{ref_file} = $config->{reference};
+#       push(@cmd,"--ref_file=$config->{reference");
     }
     elsif($config->{reference_list}) {
-        push(@cmd,"--ref_file_list=$config->{reference_list}");  
+        $conf->{ref_file_list} = $config->{reference_list};
+#        push(@cmd,"--ref_file_list=$config->{reference_list}");  
     }
     else {
         die "Must provide a value for either reference or reference_list to run bwa\n";
     }
 
-    push(@cmd, "--output_dir=$output_dir");
-    push(@cmd, $config->{other_opts});
-
-    my $cmd_string = join(' ',@cmd);
+    $conf->{overwrite} = $config->{overwrite};
+#    push(@cmd, "--output_dir=$output_dir");
+    map {
+        $conf->{$_} = $config->{other_opts}->{$_};
+    } keys %{$config->{other_opts}};
+#    push(@cmd, $config->{other_opts});
+    $conf->{run_lca} = $config->{run_lca};
+    $conf->{lgtseek} = $self;
+    $conf->{cleanup_sai} = $config->{cleanup_sai};
+    $conf->{out_file} = $config->{out_file};
+    print STDERR "about to call runBWA\n";
+    LGTbwa::runBWA($conf);
 
     # Maybe should check if this is valid.
-    my $res = $self->_run_cmd($cmd_string);
+#    my $res = $self->_run_cmd($cmd_string);
+    if($config->{run_lca}) {
     
-    my @files = split(/\n/,$self->_run_cmd("find $output_dir -name '*$basename$suff'"));
-    map {chomp $_;} @files; 
-    print STDERR join(" ",@files);
-    print STDERR "\n";
-    return \@files;
+    }
+    else {
+    
+        my @files = split(/\n/,$self->_run_cmd("find $output_dir -name '*$pre$basename$suff'"));
+        map {chomp $_;} @files; 
+        print STDERR join(" ",@files);
+        print STDERR "\n";
+        return \@files;
+    }
 }
 
 =head2 bwaPostProcess
@@ -1122,16 +1155,18 @@ sub bestBlast2 {
     if($config->{'fasta'}) {
         $fasta = $config->{fasta};
     }
-    my $blast_bin = '';
-    if($config->{blast_bin}) {
-        $blast_bin = $config->{"blast_bin"}." -d $config->{'blast_db'} -e 1e-5 -m8 -T F ";
-    }  
+#    my $blast_bin = '';
+#    if($config->{blast_bin}) {
+        
+        #$blast_bin = $config->{"blast_bin"}." -d $config->{'blast_db'} -e 1e-5 -m8 -T F ";
+#    }  
 
     my ($name,$directories,$suffix) = fileparse($fasta,qr/\.[^.]*/);
     open OUT, ">$self->{output_dir}/$name\_filtered_blast.list" or die "Unable to open $self->{output_dir}/$name\_filtered_blast.list\n";  
     my @outputs;
 #    foreach my $file (@fastas) {
         my $files = LGTBestBlast::filterBlast({
+            blast_bin => $config->{blast_bin},
             fasta => $fasta,
             db => $config->{db},
             gitaxon => $self->getGiTaxon({}),
@@ -1235,18 +1270,19 @@ sub bestBlast {
 sub runLgtFinder {
     my ($self,$config) = @_;
 
-    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    LGTFinder::findLGT($config);
 
-    my $cmd = "perl $self->{ergatis_bin}/lgt_finder_dr.pl".
-        " --input_file_list=$config->{input_file_list}".
-        " --output_prefix=$config->{output_prefix}".
-        " --output_dir=$self->{output_dir}".
-        " --ref_lineage=$config->{ref_lineage}";
+#    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+
+#    my $cmd = "perl $self->{ergatis_dir}/lgt_finder_dr.pl".
+#        " --input_file_list=$config->{input_file_list}".
+#        " --output_prefix=$config->{output_prefix}".
+#        " --output_dir=$self->{output_dir}".
+#        " --ref_lineage=$config->{ref_lineage}";
         
-    $self->_run_cmd($cmd);
+#    $self->_run_cmd($cmd);
 
     my $pref = $config->{output_prefix} ? $config->{output_prefix} : 'lgt_finder';
-
 
     my $valid_count = $self->_run_cmd("grep ';$config->{lineage1};' $self->{output_dir}/$pref\_by_clone.txt | grep ';$config->{lineage2};' | wc -l");
     my $valid_int_count = $self->_run_cmd("wc -l $self->{output_dir}/$pref\_by_trace.txt");
