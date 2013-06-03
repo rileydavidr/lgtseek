@@ -71,7 +71,7 @@ my $lgtseek = LGTSeek->new({
     prinseq_bin => $prinseq_bin,
     paired_end => 1,
     samtools_bin => $samtools_bin,
-    taxon_hist => $options{taxon_host},
+    taxon_host => $options{taxon_host},
     taxon_dir => $options{taxon_dir},
     taxon_idx_dir => $options{taxon_idx_dir}
 });
