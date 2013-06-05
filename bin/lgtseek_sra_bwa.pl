@@ -27,6 +27,7 @@ Internal methods are usually preceded with a _
 =cut
 
 use strict;
+use lib '../lib';
 use LGTSeek;
 use File::Basename;
 use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
