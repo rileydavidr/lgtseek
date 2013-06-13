@@ -234,7 +234,7 @@ sub _prinseqFilterPaired {
 
 }
 
-=head2 run_cmd
+=head2 sam2Fasta
 
  Title   : sam2Fasta
  Usage   : my $fastas = $LGTSeek->sam2Fasta({'input' => '/path/to/file.bam'...})
@@ -469,7 +469,7 @@ sub dumpFastq {
  Usage   : $lgtseek->runBWA(({'base' => 'SRX01234','path' => '/path/to/files'})
  Function: Run bwa using the lgt_bwa wrapper
  Returns : The path to the bam file
- Args    : The input fasq/bam files and references which can be done a few different ways:
+ Args    : The input fastq/bam files and references which can be done a few different ways:
 
            # For files like /path/to/files/SRR01234_1.fastq and /path/to/files/SRR01234_2.fastq
            {'input_dir' => '/path/to/files/',
@@ -1257,9 +1257,9 @@ sub bestBlast {
     };
 }
 
-=head2 bestBlast
+=head2 runLgtFinder
 
- Title   : bestBlast
+ Title   : runLgtFinder
  Usage   : $lgtseek->runLgtFinder(({'inputs' => \@files})
  Function: Run blast (or megablast) against a reference database to find best blast hits. Then
            determine if mates look like valid LGT's
