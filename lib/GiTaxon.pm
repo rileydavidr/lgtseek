@@ -83,7 +83,7 @@ sub new {
                                  -nodesfile => $self->{'nodes'},
                                  -namesfile => $self->{'names'},
                                  -directory => $self->{'taxonomy_dir'});
-    print STDERR "Using $self->{nodes} and $self->{names} and $self->{'taxonomy_dir'} $self->{'gi_coll'} $self->{'db_host'}\n";
+    print STDERR "Using $self->{nodes} and $self->{names} and $self->{'taxonomy_dir'} $self->{'gi_coll'} $self->{'db_host'} $self->{'gi2tax'}\n";
     bless $self;
     $self->{'gi2taxon'} = $self->getgi2taxon($self->{'gi2tax'});
 
@@ -208,7 +208,7 @@ sub getgi2taxon {
         $self->insert_chunk($coll,\@chunk);
 
         close IN;
-        $coll->ensure_index({'gi' => 1});
+        $coll->ensure_index({'gi' => 1},{'safe' => 1});
     }
     return $coll;
 }
@@ -216,13 +216,13 @@ sub insert_chunk {
     my $self =shift;
     my $coll = shift;
     my $chunk = shift;
-    $coll->batch_insert($chunk);
+    $coll->batch_insert($chunk,{'safe' => 1});
 }
 sub get_mongodb_connection {
     my($self,$dbname,$host) = @_;
     # First we'll establish our connection to mongodb
     my $conn = MongoDB::Connection->new(host => $host);
-    $conn->query_timeout(600000);
+    $conn->query_timeout(60000000);
     return $conn->get_database($dbname);
 }
 
