@@ -20,13 +20,13 @@ Internal methods are usually preceded with a _
 =cut
 
 use strict;
+use lib '/opt/lgtseek/lib';
 use LGTSeek;
-use lib '../lib';
 use File::Basename;
 use Getopt::Long qw(:config no_ignore_case no_auto_abbrev);
 my %options;
 my $results = GetOptions (\%options,
-                          'download_list=s',   # Comma separated list of ID's
+                          'download_list=s',   # List of ID's with each ID on a newline.
                           'output_dir=s',      # Output directory
                           'bin_dir=s',
                           'genetorrent_path=s',
@@ -38,7 +38,7 @@ my $results = GetOptions (\%options,
 # Take care of the inputs
 my $bin_dir = $options{bin_dir} ? $options{bin_dir} : '/opt/lgtseek/bin/';
 
-my $gtpath = $options->{genetorrent_path} ? $options->{genetorrent_path} : '/opt/opt-packages/genetorrent-3.8.3';
+my $gtpath = $options{genetorrent_path} ? $options{genetorrent_path} : '/opt/genetorrent/bin';
 
 # Create an lgtseek object
 my $lgtseek = LGTSeek->new({
@@ -55,12 +55,14 @@ open (IN, "<", $downloads) or
 # Now we'll loop over the download ID's (in case there are multiple).
 while (my $id = <IN>) {
     chomp $id;
-
+    print "$id\n";
     # Download the files for that ID from CGHub.
     my $files = $lgtseek->downloadCGHub(
         {cghub_key => $options{cghub_key},
          analysis_id => $id,
          output_dir => $options{output_dir}
         });
-    print STDERR "Downloaded files: @$files\n";
+    print STDERR "Downloaded bam files: ".@{$files->{bam_files}}."\n";
+    print STDERR "Downloaded bai files: ".@{$files->{bai_files}}."\n";
+    print STDERR "Downloaded gto files: ".@{$files->{gto_files}}."\n";
 }

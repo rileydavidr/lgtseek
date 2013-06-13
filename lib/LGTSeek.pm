@@ -234,7 +234,7 @@ sub _prinseqFilterPaired {
 
 }
 
-=head2 sam2Fasta
+=head2 run_cmd
 
  Title   : sam2Fasta
  Usage   : my $fastas = $LGTSeek->sam2Fasta({'input' => '/path/to/file.bam'...})
@@ -413,7 +413,7 @@ sub downloadCGHub {
 
     # Check for all the genetorrent related options
     $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
-    $self->{genetorrent_path} = $self->{genetorrent_path} ? $self->{genetorrent_path} : '/opt/opt-packages/genetorrent-3.8.3';
+    $self->{genetorrent_path} = $self->{genetorrent_path} ? $self->{genetorrent_path} : '/opt/genetorrent/bin';
     $self->{cghub_key} = $config->{cghub_key} ? $config->{cghub_key} : $self->{cghub_key};
 
     my $retry_attempts = $config->{retry_attempts} ? $config->{retry_attempts} : 10;
@@ -437,7 +437,8 @@ sub downloadCGHub {
     # Make sure the output directory is present
     $self->_run_cmd("mkdir -p $output_dir");
 
-    my $cmd_string = "$self->{genetorrent_path} -d $download -p $output_dir -c $self->{cghub_key}";
+    my $cmd_string = "$self->{genetorrent_path}/gtdownload -d $download -p $output_dir -c $self->{cghub_key}";
+    $self->_run_cmd($cmd_string);
 
     #Retry the download several times just incase.
 #    my $retry = 1;
@@ -467,8 +468,17 @@ sub downloadCGHub {
 #        }
 #     }
 
-    my @files = `find $output_dir -name *.bam`;
-    return \@files;
+    my @bam = `find $output_dir -name *.bam`;
+    my @bai = `find $output_dir -name *.bai`;
+    my @gto = `find $output_dir -name *.gto`;
+
+    my $files = {
+        'bam_files' => \@bam,
+        'bai_files' => \@bai,
+        'gto_files' => \@gto
+    }
+    
+    return \%files;
 }
 
 
@@ -543,7 +553,7 @@ sub dumpFastq {
  Usage   : $lgtseek->runBWA(({'base' => 'SRX01234','path' => '/path/to/files'})
  Function: Run bwa using the lgt_bwa wrapper
  Returns : The path to the bam file
- Args    : The input fastq/bam files and references which can be done a few different ways:
+ Args    : The input fasq/bam files and references which can be done a few different ways:
 
            # For files like /path/to/files/SRR01234_1.fastq and /path/to/files/SRR01234_2.fastq
            {'input_dir' => '/path/to/files/',
@@ -1331,9 +1341,9 @@ sub bestBlast {
     };
 }
 
-=head2 runLgtFinder
+=head2 bestBlast
 
- Title   : runLgtFinder
+ Title   : bestBlast
  Usage   : $lgtseek->runLgtFinder(({'inputs' => \@files})
  Function: Run blast (or megablast) against a reference database to find best blast hits. Then
            determine if mates look like valid LGT's
