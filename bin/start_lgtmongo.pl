@@ -33,10 +33,15 @@ my %options;
 my $results = GetOptions (\%options,
                           'taxon_host=s', # Comma separated list of files
                           'taxon_dir=s',
+                          'port=s',
                           'taxon_idx_dir=s'
                           );
 
-my $port=10001;
+my $port=$options{port} ? $options{port} : 10000;
+
+# First prevent this machine from automatically shutting down
+print `ssh -oNoneSwitch=yes -oNoneEnabled=yes -o PasswordAuthentication=no -o ConnectTimeout=30 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o UserKnownHostsFile=/dev/null -q -i /mnt/keys/devel1.pem root\@$options{taxon_host} 'touch /var/vappio/runtime/noautoshutdown'`;
+
 # First start a mongo instance on the remote host.
 print `ssh -oNoneSwitch=yes -oNoneEnabled=yes -o PasswordAuthentication=no -o ConnectTimeout=30 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o UserKnownHostsFile=/dev/null -q -i /mnt/keys/devel1.pem root\@$options{taxon_host} \'mkdir /mnt/lgtmongo;mongod --quiet --dbpath=/mnt/lgtmongo --logpath=/mnt/lgtmongo.log --fork --port=$port\'`;
 if($?) {
