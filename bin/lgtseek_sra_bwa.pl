@@ -128,7 +128,7 @@ foreach my $file (@$sra_files) {
 
     print STDERR "Removing the raw donor/host mappings\n";
     print STDERR `rm -rf $options{output_dir}/host_alignments/`;
-    print STDERR `rm -rf $options{output_dir}/host_alignments/`;
+    print STDERR `rm -rf $options{output_dir}/donor_alignments/`;
 
     my @header = ('run_id');
     my @vals = ($name);

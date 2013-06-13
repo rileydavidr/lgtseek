@@ -154,13 +154,13 @@ sub _prinseqFilterPaired {
 
     $output_dir = $output_dir ? $output_dir : $path;
 
-    my $bin = $self->{ergatis_bin};
+    my $bin = $self->{bin_dir};
     my $prinseq_bin = $self->{prinseq_bin};
 
     my $samtools = $self->{samtools_bin};
 
     # Generate concatenated fastq files for prinseq derep filtering
-    my $cmd = "perl $bin/sam2fasta.pl --input=$bam_file --fastq=1 --combine_mates=1 --output_file=$output_dir/$name\_combined.fastq";
+    my $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=1 --output_file=$output_dir/$name\_combined.fastq";
     print STDERR "$cmd\n";
     $self->_run_cmd($cmd);
     # Run prinseq for dereplication
@@ -174,7 +174,7 @@ sub _prinseqFilterPaired {
     $self->_run_cmd($cmd);
 
     # Generate single-read fastq for low complexity filtering
-    my $cmd = "perl $bin/sam2fasta.pl --input=$bam_file --fastq=1 --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
+    my $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
     $self->_run_cmd($cmd);
 
     # Run prinseq for low complexity filtering
@@ -234,7 +234,7 @@ sub _prinseqFilterPaired {
 
 }
 
-=head2 run_cmd
+=head2 sam2Fasta
 
  Title   : sam2Fasta
  Usage   : my $fastas = $LGTSeek->sam2Fasta({'input' => '/path/to/file.bam'...})
@@ -251,7 +251,7 @@ sub sam2Fasta {
 
     my $outfile;
     my($name,$path,$suff) = fileparse($config->{input},(qr/.bam$||.sam$||.sam.gz$/));
-    my $cmd = "perl $bin/sam2fasta.pl --input=$config->{input}";
+    my $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$config->{input}";
     if($config->{fastq}) {
         $outfile = "$output_dir/$name.fastq";
         $cmd .= " --fastq=1 --output_file=$outfile";
@@ -398,6 +398,80 @@ sub downloadSRA {
     return \@files;
 }
 
+=head2 downloadCGHub
+
+ Title   : downloadCGHub
+ Usage   : $lgtseek->downloadCGHub(({'analysis_id'} = '00007994-abeb-4b16-a6ad-7230300a29e9'})
+ Function: Download TCGA bam files from the CGHub
+ Returns : A list of the downloaded file paths
+ Args    : 
+
+=cut
+
+sub downloadCGHub {
+    my ($self, $config) = @_;
+
+    # Check for all the genetorrent related options
+    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->{genetorrent_path} = $self->{genetorrent_path} ? $self->{genetorrent_path} : '/opt/opt-packages/genetorrent-3.8.3';
+    $self->{cghub_key} = $config->{cghub_key} ? $config->{cghub_key} : $self->{cghub_key};
+
+    my $retry_attempts = $config->{retry_attempts} ? $config->{retry_attempts} : 10;
+    if(!$self->{cghub_key}) {
+#        $self->{aspera_user} = 'anonftp';
+         die "Need to specify the path to the cghub_key\n";
+    }
+
+    if(!$self->{genetorrent_path}) {
+        die "Need to specify an genetorrent_path (where is genetorrent/gtdownload installed) in order to download from CGHub\n";
+    }
+    if(!$self->{output_dir}) {
+        die "Need to specify an output_dir in order to download from CGHub\n";
+    }
+
+    my $output_dir = $self->{output_dir};
+
+    # We can pass an analysis_id (UUID), URI, .xml .gto to download. They can all be called analysis_id and will work the same way.
+    my $download = $config->{analysis_id};
+
+    # Make sure the output directory is present
+    $self->_run_cmd("mkdir -p $output_dir");
+
+    my $cmd_string = "$self->{genetorrent_path} -d $download -p $output_dir -c $self->{cghub_key}";
+
+    #Retry the download several times just incase.
+#    my $retry = 1;
+
+#    my $retries = 0;
+#    while($retry) {
+
+        # Doing this echo y to ensure we accept any certs.
+#        my $out = $self->_run_cmd("echo y | $cmd_string");
+
+        # We can actually exit non-0 and still succeed if the 
+#        if($out =~ /Error/)  {
+#            print STDERR "Had a problem downloading $download to $output_dir\n";
+#            print STDERR "$cmd_string";
+#            if($retries < $retry_attempts) {
+#                $retries++;
+#                sleep $retries*2; # Sleep for 2 seconds per retry.
+#            }
+#            else {
+#                print STDERR "Retries exhausted. Tried $retries times.\n$cmd_string";
+#                exit(1);
+#            }
+#        }
+#        else {
+#            $retry = 0;
+#            print STDERR "$? $out Successfully downloaded $download to $output_dir\n";
+#        }
+#     }
+
+    my @files = `find $output_dir -name *.bam`;
+    return \@files;
+}
+
+
 =head2 dumpFastq
 
  Title   : dumpFastq
@@ -469,7 +543,7 @@ sub dumpFastq {
  Usage   : $lgtseek->runBWA(({'base' => 'SRX01234','path' => '/path/to/files'})
  Function: Run bwa using the lgt_bwa wrapper
  Returns : The path to the bam file
- Args    : The input fasq/bam files and references which can be done a few different ways:
+ Args    : The input fastq/bam files and references which can be done a few different ways:
 
            # For files like /path/to/files/SRR01234_1.fastq and /path/to/files/SRR01234_2.fastq
            {'input_dir' => '/path/to/files/',
@@ -1257,9 +1331,9 @@ sub bestBlast {
     };
 }
 
-=head2 bestBlast
+=head2 runLgtFinder
 
- Title   : bestBlast
+ Title   : runLgtFinder
  Usage   : $lgtseek->runLgtFinder(({'inputs' => \@files})
  Function: Run blast (or megablast) against a reference database to find best blast hits. Then
            determine if mates look like valid LGT's
