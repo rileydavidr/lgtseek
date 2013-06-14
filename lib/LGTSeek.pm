@@ -602,6 +602,7 @@ sub runBWA {
     if($config->{input_bam}) {
         my ($name,$path,$suff) = fileparse($config->{input_bam},'.bam');
         $basename = $name;
+        $conf->{input_base}=$basename;
         $conf->{input_bam} = $config->{input_bam};
 #        push(@cmd,"--input_bam=$config->{input_bam}");
     }
