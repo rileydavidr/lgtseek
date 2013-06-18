@@ -1416,7 +1416,7 @@ sub splitBam {
     my $i = 0;
     while(my $line = <IN>) {
         my @fields = split(/\t/,$line);
-        my $flag = &parseFlag($fields[1]);
+        my $flag = self->_parseFlag($fields[1]);
 
         # Strip out the XA tag
         $line =~ s/\s+XA:Z:\S+//;
