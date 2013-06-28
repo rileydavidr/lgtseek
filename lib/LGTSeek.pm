@@ -476,9 +476,9 @@ sub downloadCGHub {
         'bam_files' => \@bam,
         'bai_files' => \@bai,
         'gto_files' => \@gto
-    }
+    };
     
-    return \%files;
+    return $files;
 }
 
 
