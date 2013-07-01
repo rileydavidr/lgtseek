@@ -60,7 +60,7 @@ my $lgtseek = LGTSeek->new({
 my @bam_files = split(',',$options{bam_files});
 
 if($options{bam_file_list}) {
-    open IN, "<$options{bam_file_list}" or die "Couldn't open $options{bam_file_lsit}\n";
+    open IN, "<$options{bam_file_list}" or die "Couldn't open $options{bam_file_list}\n";
     while(<IN>) {
         chomp;
         push(@bam_files,$_);
