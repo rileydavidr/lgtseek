@@ -1452,6 +1452,8 @@ sub splitBam {
         $i++;
     }
     close $ofh;
+    my $files = \@outfiles;
+    return $files; 
 }
 
 sub _dec2bin {
