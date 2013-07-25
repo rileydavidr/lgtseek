@@ -234,7 +234,7 @@ sub _prinseqFilterPaired {
 
 }
 
-=head2 sam2fasta
+=head2 run_cmd
 
  Title   : sam2Fasta
  Usage   : my $fastas = $LGTSeek->sam2Fasta({'input' => '/path/to/file.bam'...})
@@ -580,14 +580,14 @@ sub runBWA {
     $self->_run_cmd("mkdir -p $output_dir");
 
     my $conf = {
-        num_aligns => 0,
+        num_aligns => 3,
         bwa_path => $self->{bwa_path},
         output_dir => $output_dir
     };
 
 
     # Build the command string;
-    my @cmd = ("$self->{ergatis_dir}/lgt_bwa --num_aligns=0 --bwa_path=$self->{bwa_path}");
+    my @cmd = ("$self->{ergatis_dir}/lgt_bwa --num_aligns=3 --bwa_path=$self->{bwa_path}");
 
     my $suff = '.sam';
     if($config->{output_bam}) {
@@ -602,7 +602,7 @@ sub runBWA {
     if($config->{input_bam}) {
         my ($name,$path,$suff) = fileparse($config->{input_bam},'.bam');
         $basename = $name;
-        $conf->{input_base}=$basename;
+	$conf->{input_base}=$basename;
         $conf->{input_bam} = $config->{input_bam};
 #        push(@cmd,"--input_bam=$config->{input_bam}");
     }
@@ -1236,7 +1236,7 @@ sub bestBlast2 {
         $fasta = $newfasta;
     }
     $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
-
+	print STDERR "bestBlast2 out_dir=$self->{output_dir}\t$config->{output_dir}\n";
     if($config->{'fasta'}) {
         $fasta = $config->{fasta};
     }
@@ -1250,17 +1250,17 @@ sub bestBlast2 {
     open OUT, ">$self->{output_dir}/$name\_filtered_blast.list" or die "Unable to open $self->{output_dir}/$name\_filtered_blast.list\n";  
     my @outputs;
 #    foreach my $file (@fastas) {
-        my $files = LGTBestBlast::filterBlast({
-            blast_bin => $config->{blast_bin},
-            fasta => $fasta,
-            db => $config->{db},
-            gitaxon => $self->getGiTaxon({}),
-            lineage1 => $config->{lineage1},
-            lineage2 => $config->{lineage2},
-            output_dir => "$self->{output_dir}"});
-        map {
-            print OUT "$files->{$_}\n";
-        } keys %$files;
+    my $files = LGTBestBlast::filterBlast({
+        blast_bin => $config->{blast_bin},
+        fasta => $fasta,
+        db => $config->{db},
+        gitaxon => $self->getGiTaxon({}),
+        lineage1 => $config->{lineage1},
+        lineage2 => $config->{lineage2},
+        output_dir => "$self->{output_dir}"});
+    map {
+	print OUT "$files->{$_}\n";
+    } keys %$files;
 
 #        push(@outputs,$files);
  #   }
@@ -1389,10 +1389,8 @@ sub runLgtFinder {
 =cut
 sub splitBam {
     my ($self,$config) = @_;
-
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     my $seqs_per_file = $config->{seqs_per_file} ? $config->{seqs_per_file} : 10000;
-
     my $samtools = $self->{samtools_bin};
 
     # Parse out the pieces of the filename
@@ -1417,7 +1415,7 @@ sub splitBam {
     while(my $line = <IN>) {
         my @fields = split(/\t/,$line);
         my $flag = $self->_parseFlag($fields[1]);
-
+        
         # Strip out the XA tag
         $line =~ s/\s+XA:Z:\S+//;
 
@@ -1452,8 +1450,9 @@ sub splitBam {
         $i++;
     }
     close $ofh;
+    print STDERR "Split $config->{input} into $count bams, each with $seqs_per_file sequences per bam.\n";
     my $files = \@outfiles;
-    return $files; 
+    return $files;
 }
 
 sub _dec2bin {
@@ -1486,5 +1485,38 @@ sub _parseFlag {
         'failqual' => substr($final_bin, 9, 1),
         'pcrdup' => substr($final_bin, 10, 1)
     };
+}
+=head2 decrypt
+
+ Title   : decrypt
+ Usage   : my $decrypted_bam=$lgtseek->decrypt(({'input' => <file.bam.gpg>, 'key' => <Path to key>})
+ Function: Decrypt a .bam.gpg input file. 
+ Returns : An un-encrypted bam
+ Args    : 
+	input       = encrypted bam for decryption
+	url         = url to download the key from
+    key         = path to key file
+	output_dir  = directory for output
+
+=cut
+sub decrypt {
+	my ($self,$config)=@_;
+	if(!$config->{input} || $config->{input}!~/\.bam\.gpg$/){die "Error: Must pass an encrypted .bam.gpg to this subroutine.\n";}
+	if(!$config->{url} && !$config->{key}){die "Must give an url to download the key from or the path to the key.\n";}
+	my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+	my($bam,$path,$suffix) = fileparse($config->{input},'.gpg');
+    my $key;
+	if($config->{url}){
+        $self->_run_cmd("wget $config->{url}");
+        $key = `find . -name '*.key' | cut -f2 -d '/'`;
+    } else {
+        $key = $config->{key};
+    }
+	$self->_run_cmd("gpg --import $key");
+	$self->_run_cmd("gpg -o $output_dir/$bam -d $config->{input}");
+	my $outfile="$output_dir/$bam";
+	$self->_run_cmd("rm $config->{input}");
+	$self->_run_cmd("rm $key");
+	return $outfile;
 }
 1;
