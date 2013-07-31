@@ -48,7 +48,7 @@ if($?) {
     die "$?";
 }
 `sleep 10`;
-`mongo $options{taxon_host} -eval "db.currentOp()" --port $port`;
+`mongo --host=$options{taxon_host} -eval "db.currentOp()" --port $port`;
 
 # We'll try again if we were unable on the last one. If this doesn't work we give up.
 if($?) {

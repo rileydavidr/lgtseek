@@ -234,7 +234,7 @@ sub _prinseqFilterPaired {
 
 }
 
-=head2 run_cmd
+=head2 sam2Fasta
 
  Title   : sam2Fasta
  Usage   : my $fastas = $LGTSeek->sam2Fasta({'input' => '/path/to/file.bam'...})
