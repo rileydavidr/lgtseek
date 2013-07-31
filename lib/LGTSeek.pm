@@ -1224,6 +1224,15 @@ sub _find_lca {
     return join(';',@lca);
 }
 
+=head2 bestBlast2
+
+ Title   : bestBlast2
+ Usage   : $lgtseek->bestBlast2(({'inputs' => \@bam_files, 'ref' => '/path/to/ref/db'})
+ Function: Run blast (or megablast) against a reference database to find best blast hits.
+ Returns : A file with all the LGT's hit information
+ Args    : An object with the input bame files and the reference database.
+
+=cut
 sub bestBlast2 {
     my ($self,$config) = @_;
     my $fasta;
@@ -1269,17 +1278,8 @@ sub bestBlast2 {
     $files->{list_file} = "$self->{output_dir}/$name\_filtered_blast.list";
     return $files;
 }
-=head2 bestBlast
 
- Title   : bestBlast
- Usage   : $lgtseek->bestBlast(({'inputs' => \@bam_files, 'ref' => '/path/to/ref/db'})
- Function: Run blast (or megablast) against a reference database to find best blast hits. Then
-           determine if mates look like valid LGT's
- Returns : A file with all the LGT's hit information
- Args    : An object with the input bame files and the reference database.
-
-=cut
-sub bestBlast {
+sub OUTDATED_bestBlast {
     my ($self,$config) = @_;
     
     my @fastas;
@@ -1342,30 +1342,23 @@ sub bestBlast {
     };
 }
 
-=head2 bestBlast
+=head2 runLgtFinder
 
- Title   : bestBlast
+ Title   : runLgtFinder
  Usage   : $lgtseek->runLgtFinder(({'inputs' => \@files})
- Function: Run blast (or megablast) against a reference database to find best blast hits. Then
-           determine if mates look like valid LGT's
+ Function: Take output from LGTBestBlast and look for putative LGT's both within reads and across read pairs
  Returns : A file with all the LGT's hit information
- Args    : An object with the input bame files and the reference database.
+ Args    : An object from BestBlast2
+ 			max_overlap => 20,
+ 			min_length  => 0,
+ 			ref_lineage => 'Homo',
+ 			output_dir  => '/somewhere/'
 
 =cut
 sub runLgtFinder {
     my ($self,$config) = @_;
 
     LGTFinder::findLGT($config);
-
-#    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
-
-#    my $cmd = "perl $self->{ergatis_dir}/lgt_finder_dr.pl".
-#        " --input_file_list=$config->{input_file_list}".
-#        " --output_prefix=$config->{output_prefix}".
-#        " --output_dir=$self->{output_dir}".
-#        " --ref_lineage=$config->{ref_lineage}";
-        
-#    $self->_run_cmd($cmd);
 
     my $pref = $config->{output_prefix} ? $config->{output_prefix} : 'lgt_finder';
 
