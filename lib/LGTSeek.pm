@@ -1357,7 +1357,9 @@ sub OUTDATED_bestBlast {
 =cut
 sub runLgtFinder {
     my ($self,$config) = @_;
-
+    if($config->{output_dir}) {
+        $self->_run_cmd("mkdir -p $config->{output_dir}");
+    }
     LGTFinder::findLGT($config);
 
     my $pref = $config->{output_prefix} ? $config->{output_prefix} : 'lgt_finder';
