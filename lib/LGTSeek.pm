@@ -1364,8 +1364,8 @@ sub runLgtFinder {
 
     my $pref = $config->{output_prefix} ? $config->{output_prefix} : 'lgt_finder';
 
-    my $valid_count = $self->_run_cmd("grep ';$config->{lineage1};' $self->{output_dir}/$pref\_by_clone.txt | grep ';$config->{lineage2};' | wc -l");
-    my $valid_int_count = $self->_run_cmd("wc -l $self->{output_dir}/$pref\_by_trace.txt");
+    my $valid_count = $self->_run_cmd("grep ';$config->{lineage1};' $config->{output_dir}/$pref\_by_clone.txt | grep ';$config->{lineage2};' | wc -l");
+    my $valid_int_count = $self->_run_cmd("wc -l $config->{output_dir}/$pref\_by_trace.txt");
     chomp $valid_count;
     chomp $valid_int_count;
     return {valid_clones => $valid_count,
