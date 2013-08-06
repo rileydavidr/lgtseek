@@ -240,7 +240,8 @@ sub _prinseqFilterPaired {
  Usage   : my $fastas = $LGTSeek->sam2Fasta({'input' => '/path/to/file.bam'...})
  Function: Convert a bam/sam file to a fasta file
  Returns : a list of fasta/fastq files
- Args    : sam or bam file to convert
+ Args    : input => sam or bam file to convert to fasta
+           output_dir => directory for output
 
 =cut
 sub sam2Fasta {
@@ -249,6 +250,9 @@ sub sam2Fasta {
 
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
 
+    # Make sure the output directory is present
+    $self->_run_cmd("mkdir -p $output_dir");
+    
     my $outfile;
     my($name,$path,$suff) = fileparse($config->{input},(qr/.bam$||.sam$||.sam.gz$/));
     my $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$config->{input}";
