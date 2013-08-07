@@ -1091,6 +1091,7 @@ sub blast2lca {
 
     open IN, "<$config->{blast}" or die "Unable to open $config->{blast}\n";
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->_run_cmd("mkdir -p $output_dir");
     
     my ($name,$directories,$suffix) = fileparse($config->{blast},qr/\.[^.]*/);
     open OUT, ">$output_dir/$name\_lca.out" or die "Unable to open $output_dir/$name\_lca.out";
@@ -1248,7 +1249,8 @@ sub bestBlast2 {
             paired => 1});
         $fasta = $newfasta;
     }
-    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->_run_cmd("mkdir -p $output_dir");
 	print STDERR "bestBlast2 out_dir=$self->{output_dir}\t$config->{output_dir}\n";
     if($config->{'fasta'}) {
         $fasta = $config->{fasta};
@@ -1270,7 +1272,7 @@ sub bestBlast2 {
         gitaxon => $self->getGiTaxon({}),
         lineage1 => $config->{lineage1},
         lineage2 => $config->{lineage2},
-        output_dir => "$self->{output_dir}"});
+        output_dir => $output_dir});
     map {
 	print OUT "$files->{$_}\n";
     } keys %$files;
@@ -1383,12 +1385,17 @@ sub runLgtFinder {
  Usage   : $lgtseek->splitBam(({'input' => $file})
  Function: Split a bam file into smaller chunks.
  Returns : A list of the bam files split up
- Args    : An object with the input bam files.
+ Args    : 
+            input = An object with the input bam files
+            seqs_pre_file = # of seqs per file for each split file
+            output_dir = Directory for output
+            samtools_bin = bin directory with samtools
 
 =cut
 sub splitBam {
     my ($self,$config) = @_;
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->_run_cmd("mkdir -p $output_dir");
     my $seqs_per_file = $config->{seqs_per_file} ? $config->{seqs_per_file} : 10000;
     my $samtools = $self->{samtools_bin};
 
@@ -1503,6 +1510,7 @@ sub decrypt {
 	if(!$config->{input} || $config->{input}!~/\.bam\.gpg$/){die "Error: Must pass an encrypted .bam.gpg to this subroutine.\n";}
 	if(!$config->{url} && !$config->{key}){die "Must give an url to download the key from or the path to the key.\n";}
 	my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->_run_cmd("mkdir -p $output_dir");
 	my($bam,$path,$suffix) = fileparse($config->{input},'.gpg');
     my $key;
 	if($config->{url}){
@@ -1517,5 +1525,51 @@ sub decrypt {
 	$self->_run_cmd("rm $config->{input}");
 	$self->_run_cmd("rm $key");
 	return $outfile;
+}
+=head2 mpileup
+
+ Title   : mpileup
+ Usage   : my $mpileup_file=$lgtseek->mpileup({'input' => <bam>})
+ Function: Calculate samtools mpileup 
+ Returns : File path to mpileup output.
+ Args    : 
+    input       = unsorted bam
+    srt_bam     = position sorted bam input
+    ref         = Reference (Optional)
+    max         = max per-BAM depth to avoid excessive memory usage [250] (Optional)
+    cleanup     = <0|1> [0] 1= rm input.srt.bam 
+
+=cut
+sub mpileup {
+    my ($self,$config)=@_;
+    if(!$config->{input} && !$config->{srt_bam}){die "Error: Must give an input bam to calculat coverage on.\n";}
+    my $input = $config->{input} ? $config->{input} : $config->{srt_bam};
+    my($fn,$path,$suffix) = fileparse($config->{input},'.bam');
+    my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->_run_cmd("mkdir -p $output_dir");
+    my $samtools = $self->{samtools_bin};
+    my $srt_bam;
+    my $max = $config->{max} ? $config->{max} : "250";
+    my $cleanup = $config->{cleanup} ? $config->{cleanup} : "0";
+
+    ## Sort input if needed
+    if($config->{input}){
+        _run_cmd("$samtools sort $config->{input} $output_dir/$fn\.srt");
+        $srt_bam = "$output_dir/$fn\.srt.bam";
+    } else {
+        $srt_bam = "$config->{$srt_bam}";
+    }
+
+    ## Calculate mpileup
+    if($config->{ref}){
+        _run_cmd("$samtools mpileup -d $max -Af $config->{ref} $srt_bam > $output_dir/$fn\.mpileup");
+    } else {
+        _run_cmd("$samtools mpileup -d $max -A $srt_bam > $output_dir/$fn\.mpileup");
+    }        
+    if($cleanup == 1 && $config->{input}){
+        _run_cmd("rm $output_dir/$fn\.srt.bam");
+    }
+    my $outfile = "$output_dir\$fn\.mpileup";
+    return $outfile;
 }
 1;
