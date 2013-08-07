@@ -1,4 +1,5 @@
 package setup_default_paths;
+use warnings;
 use strict;
 use Exporter;
 our @ISA = qw(Exporter);
@@ -59,9 +60,10 @@ sub setup_default_paths {
 		donor_lineage => "Bacteria",
 		host_lineage => "Eukaryota"
 	};
-	
-	if($main::options{clovr}==1){foreach my $keys (keys %$clovr){$main::options{$keys}=$clovr->{$keys};}}
-	if($main::options{diag}==1){foreach my $keys (keys %$diag){$main::options{$keys}=$diag->{$keys};}}			
-	if($main::options{fs}==1){foreach my $keys (keys %$fs){$main::options{$keys}=$fs->{$keys};}}
+	print STDERR "TEST!!!!!!! $main::options{fs}\n";
+	if($main::options{clovr}==1){foreach my $keys (keys %$clovr){$main::options{$keys}="$clovr->{$keys}";}}
+	if($main::options{diag}==1){foreach my $keys (keys %$diag){$main::options{$keys}="$diag->{$keys}";}}			
+	if($main::options{fs}==1){foreach my $keys (keys %$fs){$main::options{$keys}="$fs->{$keys}";}}
+	if($main::options{fs}==1){print STDERR "FOOBAR\n";}
 }
 1;
