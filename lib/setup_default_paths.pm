@@ -10,7 +10,11 @@ our @EXPORT = qw( setup_default_paths );
 sub setup_default_paths {
 	our %options;
 	our $results;
-	my $diag = 
+	our $clovr = $main::options{clovr} ? $main::options{clovr} : "0";
+	our $diag = $main::options{diag} ? $main::options{diag} : "0";
+	our $fs = $main::options{fs} ? $main::options{fs} : "0";
+	
+	my $diag_ops = 
 	{
 		bin_dir => "/opt/lgtseek/bin/",
 		ergatis_bin => "/opt/ergatis/bin/",
@@ -27,7 +31,7 @@ sub setup_default_paths {
 		host_lineage => "Eukaryota"
 	};
 	
-	my $clovr = 
+	my $clovr_ops = 
 	{
 		bin_dir => "/opt/lgtseek/bin/",
 		ergatis_bin => "/opt/ergatis/bin/",
@@ -44,7 +48,7 @@ sub setup_default_paths {
 		host_lineage => "Eukaryota"
 	};
 
-	my $fs = 
+	my $fs_ops = 
 	{
 		bin_dir => "/local/projects-t3/HLGT/scripts/lgtseek/bin/",
 		ergatis_bin => "/local/projects/ergatis/package-driley/bin/",
@@ -60,10 +64,9 @@ sub setup_default_paths {
 		donor_lineage => "Bacteria",
 		host_lineage => "Eukaryota"
 	};
-	print STDERR "TEST!!!!!!! $main::options{fs}\n";
-	if($main::options{clovr}==1){foreach my $keys (keys %$clovr){$main::options{$keys}="$clovr->{$keys}";}}
-	if($main::options{diag}==1){foreach my $keys (keys %$diag){$main::options{$keys}="$diag->{$keys}";}}			
-	if($main::options{fs}==1){foreach my $keys (keys %$fs){$main::options{$keys}="$fs->{$keys}";}}
-	if($main::options{fs}==1){print STDERR "FOOBAR\n";}
+
+	if($clovr==1){foreach my $keys (keys %$clovr_ops){$main::options{$keys}="$clovr_ops->{$keys}";}}
+	if($diag==1){foreach my $keys (keys %$diag_ops){$main::options{$keys}="$diag_ops->{$keys}";}}			
+	if($fs==1){foreach my $keys (keys %$fs_ops){$main::options{$keys}="$fs_ops->{$keys}";}}
 }
 1;
