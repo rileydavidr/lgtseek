@@ -23,6 +23,7 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
+## use warnings;
 use strict;
 use version;
 use File::Basename;
@@ -104,17 +105,22 @@ sub getGiTaxon {
 =head2 prinseqFilterBam
 
  Title   : prinseqFilterBam
- Usage   : my $filteredBam = $LGTSeek->prinseqFilterBam({'bam_file' => '/path/to/file.bam'...})
+ Usage   : my $filteredBam = $LGTSeek->prinseqFilterBam({'input_bam' => '/path/to/file.bam'...})
  Function: Prinseq filter a bam file
  Returns : Path to the filtered bam file
- Args    : A bam_file and optionally the path to the prinseq_bin if this value
-           was not already passed in.
-
+ Args    : 
+        input_bam    => /path/to/file.bam
+        output_dir   => /path/for/output.bam
+        prinseq_bin  =>
+        samtools_bin =>
+        ergatis_bin  =>
+        bin_dir      =>
 =cut
 
 sub prinseqFilterBam {
     my($self,$config) = @_;
-    
+    if(!$config->{input_bam}){die "Must pass &prinseqFilterBam and input =>\n"};
+    if($self->empty_chk({input => $config->{input_bam}})==1){print STDERR "Warning: &prinseqFilterBam input: $config->{input} is empty.\n"}
     # Override if it is provided
     $self->{prinseq_bin} = $config->{prinseq_bin} ? $config->{prinseq_bin} :$self->{prinseq_bin};
     $self->{samtools_bin} = $self->{samtools_bin} ? $self->{samtools_bin} : 'samtools';
@@ -128,12 +134,11 @@ sub prinseqFilterBam {
 
     my $retval;
     if($self->{paired_end}) {
-        $retval = $self->_prinseqFilterPaired($config->{bam_file},$config->{output_dir});
-    }
-    else {
+        $retval = $self->_prinseqFilterPaired($config->{input_bam},$config->{output_dir});
+    } else {
         die "Single end is currently not implemented\n";
     }
-
+    ## Return ->{count} && ->{file}
     return $retval;
 }
 
@@ -143,14 +148,14 @@ sub prinseqFilterBam {
  Usage   : *PRIVATE*
  Function: Prinseq filter a bam paired end file
  Returns : Path to the filtered bam file
- Args    : A bam file to filter
+ Args    : @_=($self,<bam_to_filter>,<output_dir>)
 
 =cut
 
 sub _prinseqFilterPaired {
     my($self,$bam_file,$output_dir) = @_;
 
-    my($name,$path,$suff) = fileparse($bam_file,'.bam');
+    my($name,$path,$suff) = fileparse($bam_file,".bam");
 
     $output_dir = $output_dir ? $output_dir : $path;
 
@@ -164,73 +169,73 @@ sub _prinseqFilterPaired {
     print STDERR "$cmd\n";
     $self->_run_cmd($cmd);
     # Run prinseq for dereplication
-    my $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_combined.fastq --out_good=$output_dir/$name\_derep_good --out_bad=$output_dir/$name\_derep_bad -derep 14";
+    $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_combined.fastq --out_good=$output_dir/$name\_derep_good --out_bad=$output_dir/$name\_derep_bad -derep 14";
     print STDERR "$cmd\n";
     $self->_run_cmd($cmd);
 
     # Pull out bad ids
-    my $cmd = "perl -e 'while(<>){s/\@//;print;<>;<>;<>;}' $output_dir/$name\_derep_bad.fastq > $output_dir/$name\_derep_bad_ids.out";
+    $cmd = "perl -e 'while(<>){s/\@//;print;<>;<>;<>;}' $output_dir/$name\_derep_bad.fastq > $output_dir/$name\_derep_bad_ids.out";
     print STDERR "$cmd\n";
     $self->_run_cmd($cmd);
 
     # Generate single-read fastq for low complexity filtering
-    my $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
+    $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
     $self->_run_cmd($cmd);
 
     # Run prinseq for low complexity filtering
-    my $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_1.fastq --out_good=$output_dir/$name\_lc_1_good --out_bad=$output_dir/$name\_lc_1_bad -lc_method dust -lc_threshold 7";
+    $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_1.fastq --out_good=$output_dir/$name\_lc_1_good --out_bad=$output_dir/$name\_lc_1_bad -lc_method dust -lc_threshold 7";
     $self->_run_cmd($cmd);
 
     if( -e "$output_dir/$name\_lc_1_bad.fastq") {
         # Pull out bad ids
         my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_1_bad.fastq > $output_dir/$name\_lc_1_bad_ids.out";
         $self->_run_cmd($cmd);
-    }
-    else {
+    } else {
         print STDERR "Didn't find any low complexity sequences in read 1\n";
         $self->_run_cmd("touch $output_dir/$name\_lc_1_bad_ids.out");
     }
 
     # Run prinseq for low complexity filtering
-    my $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_2.fastq --out_good=$output_dir/$name\_lc_2_good --out_bad=$output_dir/$name\_lc_2_bad -lc_method dust -lc_threshold 7";
+    $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_2.fastq --out_good=$output_dir/$name\_lc_2_good --out_bad=$output_dir/$name\_lc_2_bad -lc_method dust -lc_threshold 7";
     $self->_run_cmd($cmd);
 
     # Pull out bad ids
     if( -e "$output_dir/$name\_lc_2_bad.fastq") {
         my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_2_bad.fastq > $output_dir/$name\_lc_2_bad_ids.out";
         $self->_run_cmd($cmd);
-    }
-    else {
+    } else {
         print STDERR "Didn't find any low complexity sequences in read 2\n";
         $self->_run_cmd("touch $output_dir/$name\_lc_2_bad_ids.out");
     }
 
     # Merge bad ids from derep and lc filtering
-    my $cmd = "cat $output_dir/$name\_derep_bad_ids.out $output_dir/$name\_lc_1_bad_ids.out $output_dir/$name\_lc_2_bad_ids.out | sort -u > $output_dir/$name\_bad_ids.out";
-   $self->_run_cmd($cmd);
-
-    # Filter sam file to remove bad ids
-
-    my $cmd = "perl $bin/filter_sam_from_prinseq.pl --sam_file=$bam_file --bad_list=$output_dir/$name\_bad_ids.out --out_file=$output_dir/$name\_filtered.sam";
+    $cmd = "cat $output_dir/$name\_derep_bad_ids.out $output_dir/$name\_lc_1_bad_ids.out $output_dir/$name\_lc_2_bad_ids.out | sort -u > $output_dir/$name\_bad_ids.out";
     $self->_run_cmd($cmd);
 
-    my $cmd = "$samtools view -S -b $output_dir/$name\_filtered.sam > $output_dir/$name\_filtered.bam";
-    $self->_run_cmd($cmd);
+    # Filter bam file to remove bad ids
+
+    my $filtered =$self->filter_bam_by_ids({
+        input_bam => $bam_file, 
+        bad_list => "$output_dir/$name\_bad_ids.out",
+    });
+    #my $cmd = "perl $bin/filter_sam_from_prinseq.pl --sam_file=$bam_file --bad_list=$output_dir/$name\_bad_ids.out --out_file=$output_dir/$name\_filtered.sam";
+    #$self->_run_cmd($cmd);
+
+    #my $cmd = "$samtools view -S -b $output_dir/$name\_filtered.sam > $output_dir/$name\_filtered.bam";
+    #$self->_run_cmd($cmd);
 
 
-    my $count = $self->_run_cmd("$samtools view $output_dir/$name\_filtered.bam | cut -f1 | uniq | wc -l");
-    chomp $count;
+    #my $count = $self->_run_cmd("$samtools view $output_dir/$name\_filtered.bam | cut -f1 | uniq | wc -l");
+    #chomp $count;
 
     # Blitz the sam file
-    $self->_run_cmd("rm $output_dir/$name\_filtered.sam");
+    #$self->_run_cmd("rm $output_dir/$name\_filtered.sam");
 
 #    my $cmd = "perl $bin/sam2fasta.pl --input=$output_dir/$name\_filtered.bam --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
 #    $self->_run_cmd($cmd);
 #    `rm $output_dir/$name\_filtered.sam`; 
-    return {
-        count => $count,
-        file => "$output_dir/$name\_filtered.bam"
-    }
+    ## Return ->{count} and ->{file}
+    return $filtered;
 
 }
 
@@ -525,7 +530,7 @@ sub dumpFastq {
         die "Need to specify an output_dir in order to download from the sra\n";
     }
 
-    my ($name,$path,$suff) = fileparse($config->{sra_file},'.sra');
+    my ($name,$path,$suff) = fileparse($config->{sra_file},".sra");
     chomp $name;
     my $res = $self->_run_cmd("find $self->{output_dir} -maxdepth 1 -name '$name*.fastq'");
     my @files = split(/\n/,$res);
@@ -597,23 +602,22 @@ sub runBWA {
     if($config->{output_bam}) {
         $suff = '.bam';
         $conf->{output_bam} = 1;
-#        push(@cmd, '--output_bam=1');
     }
 
     my $basename = $config->{input_base};
 
     # Handle making up the lgt_bwa command with a bam file
+    if($self->empty_chk({input => $config->{input_bam}})==1){die "Error: &runBWA input: $config->{input_bam} is empty.\n";}
     if($config->{input_bam}) {
-        my ($name,$path,$suff) = fileparse($config->{input_bam},'.bam');
+        my ($name,$path,$suff) = fileparse($config->{input_bam},("_prelim.bam",".bam"));
         $basename = $name;
-	$conf->{input_base}=$basename;
+        print STDERR "My input: $config->{input_bam}\n";
+        $conf->{input_base}=$basename;
         $conf->{input_bam} = $config->{input_bam};
-#        push(@cmd,"--input_bam=$config->{input_bam}");
     }
     elsif($config->{input_dir} && $config->{input_base}) {
         $conf->{input_dir} = $config->{input_dir};
         $conf->{input_base} = $config->{input_base};
-#        push(@cmd,"--input_dir=$config->{input_dir} --input_base=$config->{input_base}");
     }
     else {
         die "Must provide either a value to either input_bam or to input_base and input_dir\n";
@@ -624,31 +628,25 @@ sub runBWA {
         my ($name,$dir,$suff) = fileparse($config->{reference},qr/\.[^\.]+/);
         $pre = "$name\_";
         $conf->{ref_file} = $config->{reference};
-#       push(@cmd,"--ref_file=$config->{reference");
     }
     elsif($config->{reference_list}) {
         $conf->{ref_file_list} = $config->{reference_list};
-#        push(@cmd,"--ref_file_list=$config->{reference_list}");  
     }
     else {
         die "Must provide a value for either reference or reference_list to run bwa\n";
     }
 
     $conf->{overwrite} = $config->{overwrite};
-#    push(@cmd, "--output_dir=$output_dir");
     map {
         $conf->{$_} = $config->{other_opts}->{$_};
     } keys %{$config->{other_opts}};
-#    push(@cmd, $config->{other_opts});
     $conf->{run_lca} = $config->{run_lca};
     $conf->{lgtseek} = $self;
     $conf->{cleanup_sai} = $config->{cleanup_sai};
     $conf->{out_file} = $config->{out_file};
-    print STDERR "about to call runBWA\n";
     LGTbwa::runBWA($conf);
 
     # Maybe should check if this is valid.
-#    my $res = $self->_run_cmd($cmd_string);
     if($config->{run_lca}) {
     
     }
@@ -826,7 +824,7 @@ sub _getPairedClass {
             chomp $r2;
             $r2 =~ s/\tXA:Z\S+$//;
         }  
-#                print STDERR "Processing $hr1$hr2$dr1$dr2";
+#         print STDERR "Processing $hr1$hr2$dr1$dr2";
         # Should check if these ended at the same time?
         if(!$r1 || !$r2) {
             $more_lines = 0;
@@ -1034,7 +1032,7 @@ sub _bwaPostProcessDonorHostPaired {
         my $hr2_line = $obj->{r2_line};
 
         # Get the class of the donor mappings
-        my $obj = $self->_getPairedClass({fhs => \@donor_fh});
+        $obj = $self->_getPairedClass({fhs => \@donor_fh});
         my $dclass = $obj->{class};
         $more_lines = $obj->{more_lines};
         my $dr1_line = $obj->{r1_line};
@@ -1331,9 +1329,9 @@ sub OUTDATED_bestBlast {
     # Should merge the three file types here.
     my $cmd = "cat ".join(' ',@overall_files)." > $self->{output_dir}/all_overall.out";
     $self->_run_cmd($cmd);
-    my $cmd = "cat ".join(' ',@lineage1_files)." > $self->{output_dir}/all_lineage1.out";
+    $cmd = "cat ".join(' ',@lineage1_files)." > $self->{output_dir}/all_lineage1.out";
     $self->_run_cmd($cmd);
-    my $cmd = "cat ".join(' ',@lineage2_files)." > $self->{output_dir}/all_lineage2.out";
+    $cmd = "cat ".join(' ',@lineage2_files)." > $self->{output_dir}/all_lineage2.out";
     $self->_run_cmd($cmd);
 
     open OUT, ">$self->{output_dir}/filtered_blast.list" or die "Unable to open $self->{output_dir}/filtered_blast.list\n";
@@ -1394,6 +1392,8 @@ sub runLgtFinder {
 =cut
 sub splitBam {
     my ($self,$config) = @_;
+    if(!$config->{input}){die "Must give &splitBam an input =>\n";}
+    if($self->empty_chk({input => $config->{input}})==1){print STDERR "Warning: &split_bam input: $config->{input} is empty.\n";}
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->_run_cmd("mkdir -p $output_dir");
     my $seqs_per_file = $config->{seqs_per_file} ? $config->{seqs_per_file} : 10000;
@@ -1492,6 +1492,7 @@ sub _parseFlag {
         'pcrdup' => substr($final_bin, 10, 1)
     };
 }
+
 =head2 decrypt
 
  Title   : decrypt
@@ -1499,10 +1500,10 @@ sub _parseFlag {
  Function: Decrypt a .bam.gpg input file. 
  Returns : An un-encrypted bam
  Args    : 
-	input       = encrypted bam for decryption
-	url         = url to download the key from
-    key         = path to key file
-	output_dir  = directory for output
+	input       => encrypted bam for decryption
+	url         => url to download the key from
+    key         => path to key file
+	output_dir  => directory for output
 
 =cut
 sub decrypt {
@@ -1526,6 +1527,7 @@ sub decrypt {
 	$self->_run_cmd("rm $key");
 	return $outfile;
 }
+
 =head2 mpileup
 
  Title   : mpileup
@@ -1533,43 +1535,203 @@ sub decrypt {
  Function: Calculate samtools mpileup 
  Returns : File path to mpileup output.
  Args    : 
-    input       = unsorted bam
-    srt_bam     = position sorted bam input
-    ref         = Reference (Optional)
-    max         = max per-BAM depth to avoid excessive memory usage [250] (Optional)
-    cleanup     = <0|1> [0] 1= rm input.srt.bam 
+    input       => unsorted bam
+    srtd_bam     => position sorted bam input
+    ref         =>Reference (Optional)
+    max         => max per-BAM depth to avoid excessive memory usage [250] (Optional)
+    cleanup     => <0|1> [0] 1= rm input.srt.bam 
+    overwrite   => <0|1> [0] 1= overwrite 
 
 =cut
 sub mpileup {
     my ($self,$config)=@_;
-    if(!$config->{input} && !$config->{srt_bam}){die "Error: Must give an input bam to calculat coverage on.\n";}
-    my $input = $config->{input} ? $config->{input} : $config->{srt_bam};
+    if(!$config->{input} && !$config->{srtd_bam}){die "Error: Must give an input bam to calculat coverage on.\n";}
+    my $input = $config->{input} ? $config->{input} : $config->{srtd_bam};
+    if($self->empty_chk({input => $input})==1){print STDERR "Warning: &mpileup input: $input is empty.\n";}
+    my $overwrite = $config->{overwrite} ? $config->{overwrite} : 0;
     my($fn,$path,$suffix) = fileparse($config->{input},'.bam');
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    my $output = "$output_dir/$fn\.mpileup";
+    if(-e output && $overwrite==0){print STDERR "Warning: &mpileup found output already. Not overwriting: $output\n"; return $output;}
     $self->_run_cmd("mkdir -p $output_dir");
     my $samtools = $self->{samtools_bin};
-    my $srt_bam;
+    my $srtd_bam;
     my $max = $config->{max} ? $config->{max} : "250";
     my $cleanup = $config->{cleanup} ? $config->{cleanup} : "0";
 
     ## Sort input if needed
     if($config->{input}){
         _run_cmd("$samtools sort $config->{input} $output_dir/$fn\.srt");
-        $srt_bam = "$output_dir/$fn\.srt.bam";
+        $srtd_bam = "$output_dir/$fn\.srt.bam";
     } else {
-        $srt_bam = "$config->{$srt_bam}";
+        $srtd_bam = "$config->{$srtd_bam}";
     }
 
     ## Calculate mpileup
     if($config->{ref}){
-        _run_cmd("$samtools mpileup -d $max -Af $config->{ref} $srt_bam > $output_dir/$fn\.mpileup");
+        _run_cmd("$samtools mpileup -d $max -Af $config->{ref} $srtd_bam > $output");
     } else {
-        _run_cmd("$samtools mpileup -d $max -A $srt_bam > $output_dir/$fn\.mpileup");
+        _run_cmd("$samtools mpileup -d $max -A $srtd_bam > $output");
     }        
     if($cleanup == 1 && $config->{input}){
         _run_cmd("rm $output_dir/$fn\.srt.bam");
     }
-    my $outfile = "$output_dir\$fn\.mpileup";
-    return $outfile;
+    return $output;
+}
+=head2 prelim_filter
+
+ Title   : prelim_filter
+ Usage   : my $potential_LGT_bam = $lgtseek->prelim_filter({input => <bam>})
+ Function: Removes M_M reads
+ Returns : A bam will all other reads
+ Args    : A hash containing potentially several config options:
+        input_bam     => bam
+        output_dir    => directory for output
+        keep_softclip => <0|1> [0] 1= Keep the soft clipped M_M reads 
+        overwrite     => <0|1> [1] 1= Overwrite the output if it already exists
+
+
+=cut
+sub prelim_filter {
+    my ($self,$config)=@_;
+    my $input = $config->{input_bam} ? $config->{input_bam} : $self->{input_bam};
+    if($self->empty_chk({input => $input})==1){print STDERR "Warning: &prelim_filter input: $input is empty.\n"};
+    my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->_run_cmd("mkdir -p $output_dir");
+    my $keep_softclip = $config->{keep_softclip} ? $config->{keep_softclip} : "0";
+    my $samtools = $config->{samtools_bin} ? $config->{samtools_bin} : $self->{samtools_bin};
+    my $overwrite = $config->{overwrite} ? $config->{overwrite} : "0";
+
+    my ($fn,$path,$suf)=fileparse($input,".bam");
+    my $output = "$output_dir/$fn\_prelim.bam";
+    my $files_exist = 0; 
+    if (-e $output){$files_exist=1;}
+    if($files_exist == 1 && $overwrite == 0){print STDERR "&prelim_filter found previous output file. Not overwriting it.\n"; return $output;}
+    print STDERR "opening $input\n";
+    print STDERR "output name: $output\n";
+    my $header = $self->_run_cmd("samtools view -H $input");
+    open(my $in, "-|","samtools view $input") || die "Can't open: $input because: $!\n";
+    open(my $out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
+    print $out "$header";
+
+    my $more_lines = 1;
+    while($more_lines) {
+        my $line1 = <$in>;
+        my $line2 = <$in>;
+        if(!$line1 || !$line2){
+            $more_lines = 0;
+            last;
+        }
+        my ($flag1,$cigar1) = (split /\t/, $line1)[1,5];
+        my $cigar2 = (split /\t/, $line2)[5];
+        my $FLAG1 = $self->_parseFlag($flag1);
+        my $print = 0;
+        if($FLAG1->{'qunmapped'} || $FLAG1->{'munmapped'}){$print=1;}
+        if($keep_softclip==1){
+           map {
+                if($_ =~ /(\d+M)(\d+S)/ || $_ =~ /(\d+S)(\d+M)/){$print=1;}
+            } ($cigar1,$cigar2);
+        }
+        if($print==1){
+            print $out "$line1$line2";
+        }
+    }
+    close $out or die "Can't close: $out because: $!\n";
+    close $in  or die "Can't close: $in because: $!\n";
+    return $output;
+}
+=head2 filter_bam_by_ids
+
+ Title   : filter_bam_by_ids
+ Usage   : my $filtered_bam = $lgtseek->filter_bam_by_ids({input => <bam>})
+ Function: Filter bam by ids
+ Returns : A hash{file} for the new filtered bam 
+           A hash{count} of ids found
+ Args    : A hash containing potentially several config options:
+        input_bam     => bam for filtering
+        output_dir    => directory for output
+        good_list     => File path with list of desired reads
+        bad_list      => File path with a list of reads to discard
+=cut
+
+sub filter_bam_by_ids {
+    my ($self,$config)=@_;
+    if(!$config->{input_bam}){die "Error: Must pass &filter_bam_by_ids an input_bam => <BAM_TO_FILTER>\n"};
+    if($self->empty_chk({ input => "$config->{input_bam}" })==1){print STDERR "Warning: Can not filter ids from an empty input bam: $config->{input_bam}\n"; return {count=>0,file=>$config->{input_bam}};}
+    if(!$config->{good_list} && !$config->{bad_list}){die "Error: Must pass &filter_bam_by_ids a file with a list of reads to filter on. Use good_list => || bad_list => \n";}
+    ## Setup hash of ids
+    my $good_ids = {};
+    my $bad_ids = {};
+    my %found_ids;
+    if($config->{good_list}){ $good_ids = $self->_read_ids({ list => $config->{good_list} });} 
+    elsif ($config->{bad_list}){ $bad_ids = $self->_read_ids({ list => $config->{bad_list} });}
+    ## Setup input and output bams
+    my $input = $config->{input_bam};
+    my ($fn,$path,$suf)=fileparse($input,".bam");
+    my $out_dir = $config->{output_dir} ? $config->{output_dir} : $path;
+    my $out = "$out_dir$fn\_filtered.bam";
+    my $cmd = "samtools view -H $input";
+    my $header = $self->_run_cmd($cmd);
+    open (my $in, "-|", "samtools view $input") or die "&filter_bam_by_ids can't open input: $input because: $!\n";
+    open (my $fh, "| samtools view -S - -bo $out") or die "&filter_bam_by_ids can't open  output: $out because: $!\n";
+    print $fh "$header";
+    while(<$in>){
+        chomp;
+        my @fields = split(/\t/);
+        if( $config->{good_list} && $good_ids->{$fields[0]}){print $fh "$_\n"; $found_ids{$fields[0]}++;}
+        if( $config->{bad_list} && !$bad_ids->{$fields[0]}){print $fh "$_\n"; $found_ids{$fields[0]}++;}
+    }
+    close $in;
+    close $fh;
+    my $count=0;
+    foreach my $keys (keys %found_ids){$count++;}
+    return {
+        count => $count,
+        file => $out
+    };
+}
+=head2 _read_ids
+
+ Title   : _read_ids
+ Usage   : my $id_hash = $self->_read_ids({list => <ID_LIST_FILE>})
+ Function: Create a hash of id's from a list file
+ Returns : A hash of ids
+ Args    : A hash containing potentially several config options:
+        list     => File with ids 
+=cut
+sub _read_ids {
+    my ($self,$config)=@_;
+    if(!$config->{list}){die "Must pass &_read_ids a list =>\n";}
+    if($self->empty_chk({input => $config->{list}})==1){print STDERR "Warning: &_read_ids input: $config->{list} is empty\n";}
+    my $file = $config->{list};
+    my %hash;
+    open IN, "<$file" or die "&_read_ids unable to open: $file because: $!\n";
+    while(<IN>) {
+        chomp;
+        $hash{$_}=1;
+    }
+    close IN;
+    return \%hash;
+}
+=head2 empty_chk
+
+ Title   : empty_chk
+ Usage   : last if($self->empty_chk({input => <FILE>}) == 1);
+ Function: Check to make sure a file is not empty
+ Returns : 1 = Empty; 0 = input is not empty
+ Args    : A hash containing potentially several config options:
+        input     => Check if input is empty 
+=cut
+sub empty_chk {
+    my ($self,$config)=@_;
+    if(!$config->{input}){die "Must pass &empty_chk a file."}
+    my $file = $config->{input};
+    my $empty = 0; ## 0 = False, 1=True, file is empty.
+    my $count; 
+    if($file=~/\.bam$/){$count = $self->_run_cmd("samtools view $file | head | wc -l");} 
+    elsif($file=~/\.sam$/){$count = $self->_run_cmd("samtools view -S $file | head | wc -l");} 
+    else {$count = $self->_run_cmd("head $file | wc -l");}
+    if($count == 0){$empty=1;}
+    return $empty;   
 }
 1;
