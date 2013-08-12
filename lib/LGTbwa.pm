@@ -61,12 +61,6 @@ my $sam2lca;
 sub runBWA {
     my $opts = shift;
     %options = %$opts;
-# display documentation
-#if( $options{'help'} ){
-#    pod2usage( {-exitval=>0, -verbose => 2, -output => \*STDOUT} );
-#}
-
-
 
     ## make sure all passed options are peachy
     &check_parameters(\%options);
@@ -111,9 +105,9 @@ sub run_bwa {
         }
 
         if(! -e "$ref.bwt") {
-            print "Did not find reference file $ref.bwt\n";
+            print STDERR "Did not find reference file $ref.bwt\n";
 
-            print "Indexing $ref\n";
+            print STDERR "Indexing $ref\n";
             my $cmd = "$options{bwa_path} index $ref";
             system($cmd) == 0 or die "Unable to index $ref\n";
         }
@@ -134,20 +128,20 @@ sub run_bwa {
                 return;
             }
             if($options{input_bam}) {
-                my ($name,$dir,$suff) = fileparse($options{input_bam},'.bam');
+                my ($name,$dir,$suff) = fileparse($options{input_bam},("_prelim.bam",".bam"));
                 $in1 = $options{input_bam};
                 $in2 = $options{input_bam};
                 $options{input_base} = $name;
                 # Run the first one through aln
                 $out1 = "$options{output_dir}/$refname\_$name\_aln_sa1.sai";
                 my $cmd = "$options{bwa_path} aln -b -1 $options_string $ref $options{input_bam} > $out1";
-                print "Running: $cmd\n"; 
+                print STDERR "Running: $cmd\n"; 
                 system($cmd) == 0 or die "Unable to run $cmd\n";
 
                 # Run the second one through aln
                 $out2 = "$options{output_dir}/$refname\_$name\_aln_sa2.sai";
                 my $cmd = "$options{bwa_path} aln -b -2 $options_string $ref $options{input_bam} > $out2";
-                print "Running: $cmd\n";
+                print STDERR "Running: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
             else {
@@ -160,13 +154,13 @@ sub run_bwa {
                 # Run the first one through aln
                 if($options{overwrite} || ! -e $out1) {
                     my $cmd = "$options{bwa_path} aln $options_string $ref $in1 > $out1";
-                    print "Running: $cmd\n";
+                    print STDERR "Running: $cmd\n";
                     system($cmd) == 0 or die "Unable to run $cmd\n";
                 }
                 if($options{overwrite} || ! -e $out2) {
                     # Run the second one through aln
                     my $cmd = "$options{bwa_path} aln $options_string $ref $in2 > $out2";
-                    print "Running: $cmd\n";
+                    print STDERR "Running: $cmd\n";
                     system($cmd) == 0 or die "Unable to run $cmd\n";
                 }
             }
@@ -181,21 +175,21 @@ sub run_bwa {
             elsif($options{output_bam}) {
                 if($options{overwrite} || ! -e "$options{output_dir}/$refname\_$options{input_base}.bam") {
                     my $cmd = "$options{bwa_path} sampe -n $options{num_aligns} $ref \"$out1\" \"$out2\" \"$in1\" \"$in2\" | $options{samtools_path}samtools view $options{samtools_flag} -bS - > $options{output_dir}/$refname\_$options{input_base}.bam";
-                    print "Running: $cmd\n";
+                    print STDERR "Running: $cmd\n";
                     system($cmd) == 0 or die "Unable to run $cmd\n";
                 }
             }
             else {
                 if($options{overwrite} || ! -e "$options{output_dir}/$refname\_$options{input_base}.sam") {
                     my $cmd = "$options{bwa_path} sampe -n $options{num_aligns} $ref \"$out1\" \"$out2\" \"$in1\" \"$in2\" > $options{output_dir}/$refname\_$options{input_base}.sam";
-                    print "Running: $cmd\n";
+                    print STDERR "Running: $cmd\n";
                     system($cmd) == 0 or die "Unable to run $cmd\n";
                 }
             }
 
             if($options{cleanup_sai}) {
                 my $cmd = "rm -f $out1 $out2";
-                print "Running: $cmd\n";
+                print STDERR "Running: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
         }
@@ -210,17 +204,17 @@ sub run_bwa {
             my $out = "$options{output_dir}/$refname\_$options{input_base}_aln_sa.sai";
             $cmd = "$options{bwa_path} aln $options_string $ref $in > $out";
             if($options{overwrite} || ! -e "$out") {
-                print "Running: $cmd\n";
+                print STDERR "Running: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
             if($options{overwrite} || ! -e "$options{output_dir}/$refname\_$options{input_base}.sam") {
                 $cmd = "$options{bwa_path} samse -n $options{num_aligns} $ref \"$out\" \"$in\" > $options{output_dir}/$refname\_$options{input_base}.sam";
-                print "Running: $cmd\n";
+                print STDERR "Running: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
             if($options{cleanup_sai}) {
                 $cmd = "rm -f $out";
-                print "Running: $cmd\n";
+                print STDERR "Running: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
         }
