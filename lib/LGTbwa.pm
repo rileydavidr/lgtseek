@@ -67,6 +67,10 @@ sub runBWA {
     
     # This is a HACK right now.
     if($options{run_lca}) {
+        if(-e $options{out_file} && $options{overwrite}==0){
+            print STDERR "Already found the output for BWA-LCA: $options{out_file}\n";
+            return $options{out_file};
+        }
         my $lca_conf = {
             samtools_bin => "$options{samtools_path}/samtools",
             out_file => $options{out_file},
@@ -124,7 +128,7 @@ sub run_bwa {
             }
             
             if((-e $output_file) && !$options{overwrite}) {
-                print STDERR "Found $output_file\n";
+                print STDERR "Already found the output for &runBWA: $output_file.\n";
                 return;
             }
             if($options{input_bam}) {
