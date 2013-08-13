@@ -21,6 +21,32 @@ The rest of the documentation details each of the object methods.
 Internal methods are usually preceded with a _
 
 =cut
+=head2 LGTSeek.pm
+
+ Title   : LGTSeek.pm
+ Usage   : Suite of subroutines used to identify LGT
+ Routines:
+        new                 : Create lgtseek object
+        downloadSRA         :
+        dumpFastq           :
+        downloadCGHub       :
+        decrypt             :
+        prelim_filter       :
+        runBWA              :
+        bwaPostProcess      :
+        prinseqFilterBam    :
+        filter_bam_by_ids   :
+        sam2fasta           :
+        splitBam            :
+        blast2lca           :
+        bestBlast2          :
+        runLgtFinder        :
+        getGiTaxon          : 
+        mpileup             :
+        empty_chk           :
+        _parseFlag          :
+        _run_cmd            :
+=cut
 
 package LGTSeek;
 ## use warnings;
@@ -111,6 +137,7 @@ sub getGiTaxon {
  Args    : 
         input_bam    => /path/to/file.bam
         output_dir   => /path/for/output.bam
+        overwrite    => <0|1> [0] 1= Overwrite output if it is found already. 
         prinseq_bin  =>
         samtools_bin =>
         ergatis_bin  =>
@@ -124,6 +151,7 @@ sub prinseqFilterBam {
     # Override if it is provided
     $self->{prinseq_bin} = $config->{prinseq_bin} ? $config->{prinseq_bin} :$self->{prinseq_bin};
     $self->{samtools_bin} = $self->{samtools_bin} ? $self->{samtools_bin} : 'samtools';
+    my $overwrite = $config->{overwrite} ? $config->{overwrite} : 0;
     if($config->{output_dir}) {
         $self->_run_cmd("mkdir -p $config->{output_dir}");
     }
@@ -134,7 +162,7 @@ sub prinseqFilterBam {
 
     my $retval;
     if($self->{paired_end}) {
-        $retval = $self->_prinseqFilterPaired($config->{input_bam},$config->{output_dir});
+        $retval = $self->_prinseqFilterPaired($config->{input_bam},$config->{output_dir},$overwrite);
     } else {
         die "Single end is currently not implemented\n";
     }
@@ -153,71 +181,82 @@ sub prinseqFilterBam {
 =cut
 
 sub _prinseqFilterPaired {
-    my($self,$bam_file,$output_dir) = @_;
+    my($self,$bam_file,$output_dir,$overwrite) = @_;
 
     my($name,$path,$suff) = fileparse($bam_file,".bam");
 
     $output_dir = $output_dir ? $output_dir : $path;
-
+    
     my $bin = $self->{bin_dir};
     my $prinseq_bin = $self->{prinseq_bin};
 
     my $samtools = $self->{samtools_bin};
 
-    # Generate concatenated fastq files for prinseq derep filtering
-    my $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=1 --output_file=$output_dir/$name\_combined.fastq";
-    print STDERR "$cmd\n";
-    $self->_run_cmd($cmd);
-    # Run prinseq for dereplication
-    $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_combined.fastq --out_good=$output_dir/$name\_derep_good --out_bad=$output_dir/$name\_derep_bad -derep 14";
-    print STDERR "$cmd\n";
-    $self->_run_cmd($cmd);
+    if(-e "$output_dir/$name\_bad_ids.out" && $overwrite==0){
+        print STDERR "Already found the output for &prinseqFilter: $output_dir/$name\_bad_ids.out";
+        my $filtered =$self->filter_bam_by_ids({
+            input_bam => $bam_file, 
+            bad_list => "$output_dir/$name\_bad_ids.out",
+        });
+        return $filtered;
+    } else {
+        # Generate concatenated fastq files for prinseq derep filtering
+        my $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=1 --output_file=$output_dir/$name\_combined.fastq";
+        print STDERR "$cmd\n";
+        $self->_run_cmd($cmd);
+        # Run prinseq for dereplication
+        $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_combined.fastq --out_good=$output_dir/$name\_derep_good --out_bad=$output_dir/$name\_derep_bad -derep 14";
+        print STDERR "$cmd\n";
+        $self->_run_cmd($cmd);
 
-    # Pull out bad ids
-    $cmd = "perl -e 'while(<>){s/\@//;print;<>;<>;<>;}' $output_dir/$name\_derep_bad.fastq > $output_dir/$name\_derep_bad_ids.out";
-    print STDERR "$cmd\n";
-    $self->_run_cmd($cmd);
-
-    # Generate single-read fastq for low complexity filtering
-    $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
-    $self->_run_cmd($cmd);
-
-    # Run prinseq for low complexity filtering
-    $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_1.fastq --out_good=$output_dir/$name\_lc_1_good --out_bad=$output_dir/$name\_lc_1_bad -lc_method dust -lc_threshold 7";
-    $self->_run_cmd($cmd);
-
-    if( -e "$output_dir/$name\_lc_1_bad.fastq") {
         # Pull out bad ids
-        my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_1_bad.fastq > $output_dir/$name\_lc_1_bad_ids.out";
+        $cmd = "perl -e 'while(<>){s/\@//;print;<>;<>;<>;}' $output_dir/$name\_derep_bad.fastq > $output_dir/$name\_derep_bad_ids.out";
+        print STDERR "$cmd\n";
         $self->_run_cmd($cmd);
-    } else {
-        print STDERR "Didn't find any low complexity sequences in read 1\n";
-        $self->_run_cmd("touch $output_dir/$name\_lc_1_bad_ids.out");
-    }
 
-    # Run prinseq for low complexity filtering
-    $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_2.fastq --out_good=$output_dir/$name\_lc_2_good --out_bad=$output_dir/$name\_lc_2_bad -lc_method dust -lc_threshold 7";
-    $self->_run_cmd($cmd);
-
-    # Pull out bad ids
-    if( -e "$output_dir/$name\_lc_2_bad.fastq") {
-        my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_2_bad.fastq > $output_dir/$name\_lc_2_bad_ids.out";
+        # Generate single-read fastq for low complexity filtering
+        $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=0 --paired=1 --output_file=$output_dir/$name.fastq";
         $self->_run_cmd($cmd);
-    } else {
-        print STDERR "Didn't find any low complexity sequences in read 2\n";
-        $self->_run_cmd("touch $output_dir/$name\_lc_2_bad_ids.out");
-    }
 
-    # Merge bad ids from derep and lc filtering
-    $cmd = "cat $output_dir/$name\_derep_bad_ids.out $output_dir/$name\_lc_1_bad_ids.out $output_dir/$name\_lc_2_bad_ids.out | sort -u > $output_dir/$name\_bad_ids.out";
-    $self->_run_cmd($cmd);
+        # Run prinseq for low complexity filtering
+        $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_1.fastq --out_good=$output_dir/$name\_lc_1_good --out_bad=$output_dir/$name\_lc_1_bad -lc_method dust -lc_threshold 7";
+        $self->_run_cmd($cmd);
 
-    # Filter bam file to remove bad ids
+        if( -e "$output_dir/$name\_lc_1_bad.fastq") {
+            # Pull out bad ids
+            my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_1_bad.fastq > $output_dir/$name\_lc_1_bad_ids.out";
+            $self->_run_cmd($cmd);
+        } else {
+            print STDERR "Didn't find any low complexity sequences in read 1\n";
+            $self->_run_cmd("touch $output_dir/$name\_lc_1_bad_ids.out");
+        }
 
-    my $filtered =$self->filter_bam_by_ids({
-        input_bam => $bam_file, 
-        bad_list => "$output_dir/$name\_bad_ids.out",
-    });
+        # Run prinseq for low complexity filtering
+        $cmd = "perl $prinseq_bin --fastq=$output_dir/$name\_2.fastq --out_good=$output_dir/$name\_lc_2_good --out_bad=$output_dir/$name\_lc_2_bad -lc_method dust -lc_threshold 7";
+        $self->_run_cmd($cmd);
+
+        # Pull out bad ids
+        if( -e "$output_dir/$name\_lc_2_bad.fastq") {
+            my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $output_dir/$name\_lc_2_bad.fastq > $output_dir/$name\_lc_2_bad_ids.out";
+            $self->_run_cmd($cmd);
+        } else {
+            print STDERR "Didn't find any low complexity sequences in read 2\n";
+            $self->_run_cmd("touch $output_dir/$name\_lc_2_bad_ids.out");
+        }
+
+        # Merge bad ids from derep and lc filtering
+        $cmd = "cat $output_dir/$name\_derep_bad_ids.out $output_dir/$name\_lc_1_bad_ids.out $output_dir/$name\_lc_2_bad_ids.out | sort -u > $output_dir/$name\_bad_ids.out";
+        $self->_run_cmd($cmd);
+
+        # Filter bam file to remove bad ids
+
+        my $filtered =$self->filter_bam_by_ids({
+            input_bam => $bam_file, 
+            bad_list => "$output_dir/$name\_bad_ids.out",
+        });
+        return $filtered;
+    }   
+    ## Incorporated filter_sam_from_pringseq.pl into &filter_bam_by_ids
     #my $cmd = "perl $bin/filter_sam_from_prinseq.pl --sam_file=$bam_file --bad_list=$output_dir/$name\_bad_ids.out --out_file=$output_dir/$name\_filtered.sam";
     #$self->_run_cmd($cmd);
 
@@ -235,7 +274,7 @@ sub _prinseqFilterPaired {
 #    $self->_run_cmd($cmd);
 #    `rm $output_dir/$name\_filtered.sam`; 
     ## Return ->{count} and ->{file}
-    return $filtered;
+
 
 }
 
@@ -607,11 +646,13 @@ sub runBWA {
     my $basename = $config->{input_base};
 
     # Handle making up the lgt_bwa command with a bam file
-    if($self->empty_chk({input => $config->{input_bam}})==1){die "Error: &runBWA input: $config->{input_bam} is empty.\n";}
+    if($self->empty_chk({input => $config->{input_bam}})==1){
+        print STDERR "Error: &runBWA input: $config->{input_bam} is empty.\n";
+        return $config->{input_bam};
+    }
     if($config->{input_bam}) {
         my ($name,$path,$suff) = fileparse($config->{input_bam},("_prelim.bam",".bam"));
         $basename = $name;
-        print STDERR "My input: $config->{input_bam}\n";
         $conf->{input_base}=$basename;
         $conf->{input_bam} = $config->{input_bam};
     }
@@ -654,7 +695,7 @@ sub runBWA {
     
         my @files = split(/\n/,$self->_run_cmd("find $output_dir -name '*$pre$basename$suff'"));
         map {chomp $_;} @files; 
-        print STDERR join(" ",@files);
+        print STDERR join("\n",@files);
         print STDERR "\n";
         return \@files;
     }
@@ -1249,7 +1290,6 @@ sub bestBlast2 {
     }
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->_run_cmd("mkdir -p $output_dir");
-	print STDERR "bestBlast2 out_dir=$self->{output_dir}\t$config->{output_dir}\n";
     if($config->{'fasta'}) {
         $fasta = $config->{fasta};
     }
@@ -1272,7 +1312,7 @@ sub bestBlast2 {
         lineage2 => $config->{lineage2},
         output_dir => $output_dir});
     map {
-	print OUT "$files->{$_}\n";
+	   print OUT "$files->{$_}\n";
     } keys %$files;
 
 #        push(@outputs,$files);
@@ -1552,7 +1592,7 @@ sub mpileup {
     my($fn,$path,$suffix) = fileparse($config->{input},'.bam');
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     my $output = "$output_dir/$fn\.mpileup";
-    if(-e output && $overwrite==0){print STDERR "Warning: &mpileup found output already. Not overwriting: $output\n"; return $output;}
+    if(-e $output && $overwrite==0){print STDERR "Already found the output for &mpileup: $output\n"; return $output;}
     $self->_run_cmd("mkdir -p $output_dir");
     my $samtools = $self->{samtools_bin};
     my $srtd_bam;
@@ -1561,7 +1601,7 @@ sub mpileup {
 
     ## Sort input if needed
     if($config->{input}){
-        _run_cmd("$samtools sort $config->{input} $output_dir/$fn\.srt");
+        $self->_run_cmd("$samtools sort $config->{input} $output_dir/$fn\.srt");
         $srtd_bam = "$output_dir/$fn\.srt.bam";
     } else {
         $srtd_bam = "$config->{$srtd_bam}";
@@ -1569,12 +1609,12 @@ sub mpileup {
 
     ## Calculate mpileup
     if($config->{ref}){
-        _run_cmd("$samtools mpileup -d $max -Af $config->{ref} $srtd_bam > $output");
+        $self->_run_cmd("$samtools mpileup -d $max -Af $config->{ref} $srtd_bam > $output");
     } else {
-        _run_cmd("$samtools mpileup -d $max -A $srtd_bam > $output");
+        $self->_run_cmd("$samtools mpileup -d $max -A $srtd_bam > $output");
     }        
     if($cleanup == 1 && $config->{input}){
-        _run_cmd("rm $output_dir/$fn\.srt.bam");
+        $self->_run_cmd("rm $output_dir/$fn\.srt.bam");
     }
     return $output;
 }
@@ -1606,7 +1646,7 @@ sub prelim_filter {
     my $output = "$output_dir/$fn\_prelim.bam";
     my $files_exist = 0; 
     if (-e $output){$files_exist=1;}
-    if($files_exist == 1 && $overwrite == 0){print STDERR "&prelim_filter found previous output file. Not overwriting it.\n"; return $output;}
+    if($files_exist == 1 && $overwrite == 0){print STDERR "Already found the output for &prelim_filter: $output.\n"; return $output;}
     print STDERR "opening $input\n";
     print STDERR "output name: $output\n";
     my $header = $self->_run_cmd("samtools view -H $input");
@@ -1643,10 +1683,11 @@ sub prelim_filter {
 =head2 filter_bam_by_ids
 
  Title   : filter_bam_by_ids
- Usage   : my $filtered_bam = $lgtseek->filter_bam_by_ids({input => <bam>})
+ Usage   : my $filtered_bam = $lgtseek->filter_bam_by_ids({input => <bam>, good_list=><list of desired ids>})
+            Ideal for prinseq filtering from a list of ids
  Function: Filter bam by ids
- Returns : A hash{file} for the new filtered bam 
-           A hash{count} of ids found
+ Returns : A hash{file} = new filtered bam 
+           A hash{count} = # ids found
  Args    : A hash containing potentially several config options:
         input_bam     => bam for filtering
         output_dir    => directory for output
@@ -1734,4 +1775,83 @@ sub empty_chk {
     if($count == 0){$empty=1;}
     return $empty;   
 }
+=head2 new2
+
+ Title   : new2
+ Usage   : my $lgtseek = LGTSeek->new2({options => \%options})
+ Function: Creates a new LGTSeek object taking the --options and default hardcoded paths. --diag|clovr|fs= <0|1> 
+ Returns : An instance of LGTSeek
+ Args    : options => \%options
+
+=cut
+sub new2 {
+    my ($class,$config)=@_;
+    my $self = $config;
+    bless $self;
+    my %system;
+    $system{diag}  = $config->{options}->{diag} ? $config->{options}->{diag} : 0;
+    $system{clovr} = $config->{options}->{clovr} ? $config->{options}->{clovr} : 0;
+    $system{fs}    = $config->{options}->{fs} ? $config->{options}->{fs} : 0;
+    
+    my $diag = 
+    {
+        paired_end => 1,
+        bin_dir => "/opt/lgtseek/bin/",
+        ergatis_bin => "/opt/ergatis/bin/",
+        prinseq_bin => "/opt/prinseq/bin/",
+        samtools_bin => "samtools",
+        split_bac_list => "/mnt/staging/data/lgt_seq/mnt/references/split_refseq_bacteria/split_bacteria_ref.list",
+        hg19_ref => "/mnt/staging/data/lgt_seq/mnt/references/hg19/dna/hg19.fa",
+        refseq_list => "/mnt/staging/data/lgt_seq/mnt/references/refseq_bacteria_BWA_INDEXED_20110831/refseq.list",
+        taxon_host => "cloud-128-152.diagcomputing.org:10001",
+        taxon_dir => "/mnt/staging/data/lgt_seq/mnt/references/taxonomy",
+        taxon_idx_dir => "/mnt/staging/data/lgt_seq/mnt/references/taxonomy",
+        path_to_blastdb => "/mnt/staging/data/ncbi-nt/nt",
+        donor_lineage => "Bacteria",
+        host_lineage => "Eukaryota"
+    };
+    
+    my $clovr = 
+    {
+        paired_end => 1,
+        bin_dir => "/opt/lgtseek/bin/",
+        ergatis_bin => "/opt/ergatis/bin/",
+        prinseq_bin => "/opt/prinseq/bin/",
+        samtools_bin => "samtools",
+        split_bac_list => "/mnt/references/split_refseq_bacteria/split_bacteria_ref.list",
+        hg19_ref => "/mnt/references/hg19/dna/hg19.fa",
+        refseq_list => "/mnt/references/refseq_bacteria_BWA_INDEXED_20110831/refseq.list",
+        taxon_host => "cloud-128-152.diagcomputing.org:10001",                      
+        taxon_dir => "/mnt/references/taxonomy/20120720_135302/",
+        taxon_idx_dir => "/mnt/references/taxonomy/20120720_135302/",
+        path_to_blastdb => "/mnt/scratch/ksieber/ref/refseq_bacteria_merged.fna",  ## FIX this
+        donor_lineage => "Bacteria",
+        host_lineage => "Eukaryota"
+    };
+
+    my $fs = 
+    {
+        paired_end => 1,
+        bin_dir => "/local/projects-t3/HLGT/scripts/lgtseek/bin/",
+        ergatis_bin => "/local/projects/ergatis/package-driley/bin/",
+        prinseq_bin => "/home/ksieber/lib/prinseq-lite-0.18.1/",
+        samtools_bin => "samtools",
+        split_bac_list => "/local/projects-t3/HLGT/references/split_bacteria/all_bacteria.list",
+        hg19_ref => "/local/projects-t3/HLGT/references/hg19/hg19.fa",
+        refseq_list => "/local/projects-t3/HLGT/references/refseq_bacteria_BWA_INDEXED_20110831/refseq.list",
+        taxon_host => "mongotest1-lx.igs.umaryland.edu:10001",
+        taxon_dir => "/local/db/repository/ncbi/blast/20120414_001321/taxonomy/",
+        taxon_idx_dir => "/local/projects-t3/HLGT/idx_dir/20120414",
+        path_to_blastdb => "/local/db/repository/ncbi/blast/20120414_001321/nt/nt",
+        donor_lineage => "Bacteria",
+        host_lineage => "Eukaryota"
+    };
+
+    if($system{diag}==1){foreach my $key (keys %$diag){$self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $diag->{$key};}}
+    if($system{clovr}==1){foreach my $key (keys %$clovr){$self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $clovr->{$key};}}
+    if($system{fs}==1){foreach my $key (keys %$fs){$self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $fs->{$key};}}
+    return $self;
+
+}
+
 1;
