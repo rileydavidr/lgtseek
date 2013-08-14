@@ -298,7 +298,7 @@ sub sam2Fasta {
     $self->_run_cmd("mkdir -p $output_dir");
     
     my $outfile;
-    my($name,$path,$suff) = fileparse($config->{input},(qr/.bam$||.sam$||.sam.gz$/));
+    my($name,$path,$suff) = fileparse($config->{input},(qr/_filtered.bam$||.bam$||.sam$||.sam.gz$/));
     my $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$config->{input}";
     if($config->{fastq}) {
         $outfile = "$output_dir/$name.fastq";
@@ -1787,7 +1787,7 @@ sub empty_chk {
 sub new2 {
     my ($class,$config)=@_;
     my $self = $config;
-    bless $self;
+    
     my %system;
     $system{diag}  = $config->{options}->{diag} ? $config->{options}->{diag} : 0;
     $system{clovr} = $config->{options}->{clovr} ? $config->{options}->{clovr} : 0;
@@ -1847,9 +1847,26 @@ sub new2 {
         host_lineage => "Eukaryota"
     };
 
-    if($system{diag}==1){foreach my $key (keys %$diag){$self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $diag->{$key};}}
-    if($system{clovr}==1){foreach my $key (keys %$clovr){$self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $clovr->{$key};}}
-    if($system{fs}==1){foreach my $key (keys %$fs){$self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $fs->{$key};}}
+    foreach my $key (%{$config->{options}}){
+        $self->{$key} = $config->{options}->{$key};
+    }
+
+    if($system{diag}==1){
+        foreach my $key (keys %$diag){
+            $self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $diag->{$key};
+        }
+    }
+    if($system{clovr}==1){
+        foreach my $key (keys %$clovr){
+            $self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $clovr->{$key};
+        }
+    }
+    if($system{fs}==1){
+        foreach my $key (keys %$fs){
+            $self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $fs->{$key};
+        }
+    }
+    bless $self;
     return $self;
 
 }
