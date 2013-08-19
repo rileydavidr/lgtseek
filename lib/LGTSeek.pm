@@ -1425,7 +1425,7 @@ sub runLgtFinder {
  Returns : A list of the bam files split up
  Args    : 
             input = An object with the input bam files
-            seqs_pre_file = # of seqs per file for each split file
+            seqs_per_file = # of seqs per file for each split file
             output_dir = Directory for output
             samtools_bin = bin directory with samtools
 
@@ -1629,6 +1629,8 @@ sub mpileup {
         output_dir    => directory for output
         keep_softclip => <0|1> [0] 1= Keep the soft clipped M_M reads 
         overwrite     => <0|1> [1] 1= Overwrite the output if it already exists
+        split_bam     => <0|1> [0] 1= Split by by #seqs_per_file
+        seqs_per_file  => [50000000] 
 
 
 =cut
@@ -1638,17 +1640,30 @@ sub prelim_filter {
     if($self->empty_chk({input => $input})==1){print STDERR "Warning: &prelim_filter input: $input is empty.\n"};
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->_run_cmd("mkdir -p $output_dir");
-    my $keep_softclip = $config->{keep_softclip} ? $config->{keep_softclip} : "0";
     my $samtools = $config->{samtools_bin} ? $config->{samtools_bin} : $self->{samtools_bin};
-    my $overwrite = $config->{overwrite} ? $config->{overwrite} : "0";
+    
+    my $keep_softclip = $config->{keep_softclip} ? $config->{keep_softclip} : $self->{keep_softclip};
+    my $overwrite = $config->{overwrite} ? $config->{overwrite} : $self->{overwrite};
+    my $split_bam = $config->{split_bam} ? $config->{split_bam} : $self->{split_bam};
+    my $seqs_per_file = $config->{seqs_per_file} ? $config->{seqs_per_file} : $self->{seqs_per_file};
+    
+    my $i = 0;
+    my $count = 0;
+    my $output;
 
+    ## Setup first output
     my ($fn,$path,$suf)=fileparse($input,".bam");
-    my $output = "$output_dir/$fn\_prelim.bam";
+    if($split_bam==1){$output = "$output_dir/$fn\_$count\_prelim.bam";}
+    else {$output = "$output_dir/$fn\_prelim.bam";}
+    my @output_list;
+    push(@output_list, $output);
+    ## Check if the output exists already
     my $files_exist = 0; 
     if (-e $output){$files_exist=1;}
     if($files_exist == 1 && $overwrite == 0){print STDERR "Already found the output for &prelim_filter: $output.\n"; return $output;}
-    print STDERR "opening $input\n";
-    print STDERR "output name: $output\n";
+
+    #print STDERR "&prelim_filter opening: $input\n"; # Testing purposes
+    #print STDERR "&prelim_filter output: $output\n"; # Testing purposes
     my $header = $self->_run_cmd("samtools view -H $input");
     open(my $in, "-|","samtools view $input") || die "Can't open: $input because: $!\n";
     open(my $out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
@@ -1658,27 +1673,42 @@ sub prelim_filter {
     while($more_lines) {
         my $line1 = <$in>;
         my $line2 = <$in>;
+        ## Stop if we 
         if(!$line1 || !$line2){
             $more_lines = 0;
             last;
         }
         my ($flag1,$cigar1) = (split /\t/, $line1)[1,5];
-        my $cigar2 = (split /\t/, $line2)[5];
+        my ($flag2,$cigar2) = (split /\t/, $line2)[1,5];
         my $FLAG1 = $self->_parseFlag($flag1);
+        my $FLAG2 = $self->_parseFlag($flag2);
         my $print = 0;
         if($FLAG1->{'qunmapped'} || $FLAG1->{'munmapped'}){$print=1;}
         if($keep_softclip==1){
-           map {
-                if($_ =~ /(\d+M)(\d+S)/ || $_ =~ /(\d+S)(\d+M)/){$print=1;}
-            } ($cigar1,$cigar2);
+            map {
+            #   if($_ =~ /(\d+M)(\d+S)/ || $_ =~ /(\d+S)(\d+M)/){$print=1;}
+                if($_ =~ /(\d+)M(\d+)S/ && $2 >= 24){$print=1;}
+                if($_ =~ /(\d+)S(\d+)M/ && $1 >= 24){$print=1;}
+            }($cigar1,$cigar2);
+        }
+        if($split_bam==1 && $i >= $seqs_per_file){
+            close $out or die "Unable to close &prelim_filter output: $output\n";
+            $count += 1;
+            $output = "$output_dir/$fn\_$count\_prelim.bam";
+            open($out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
+            push(@output_list, $output);
+            print $out "$header"; 
+            $i=0;
         }
         if($print==1){
             print $out "$line1$line2";
+            $i+=2;
         }
     }
     close $out or die "Can't close: $out because: $!\n";
     close $in  or die "Can't close: $in because: $!\n";
-    return $output;
+    foreach my $foo (@output_list){print STDERR "$foo\n";}
+    return \@output_list;
 }
 =head2 filter_bam_by_ids
 
@@ -1793,8 +1823,15 @@ sub new2 {
     $system{clovr} = $config->{options}->{clovr} ? $config->{options}->{clovr} : 0;
     $system{fs}    = $config->{options}->{fs} ? $config->{options}->{fs} : 0;
     
+    ## If no system was passed with --options we assume we are on the filesystem and print a warning.
+    if(!$config->{options}->{diag} && !$config->{options}->{clovr} && !$config->{options}->{fs}){
+        $system{fs}=1;
+        print STDERR "**** Warning: No system specified. Assuming we are on the filesystem. ****\n";
+    }
     my $diag = 
     {
+        seqs_per_file => 50000000,
+        keep_softclip => 1,
         paired_end => 1,
         bin_dir => "/opt/lgtseek/bin/",
         ergatis_bin => "/opt/ergatis/bin/",
@@ -1813,6 +1850,8 @@ sub new2 {
     
     my $clovr = 
     {
+        seqs_per_file => 50000000,
+        keep_softclip => 1,
         paired_end => 1,
         bin_dir => "/opt/lgtseek/bin/",
         ergatis_bin => "/opt/ergatis/bin/",
@@ -1831,6 +1870,9 @@ sub new2 {
 
     my $fs = 
     {
+        seqs_per_file => 50000000,
+        keep_softclip => 0,
+        split_bam => 0,
         paired_end => 1,
         bin_dir => "/local/projects-t3/HLGT/scripts/lgtseek/bin/",
         ergatis_bin => "/local/projects/ergatis/package-driley/bin/",
@@ -1866,6 +1908,8 @@ sub new2 {
             $self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $fs->{$key};
         }
     }
+
+
     bless $self;
     return $self;
 
