@@ -1596,26 +1596,43 @@ sub mpileup {
     $self->_run_cmd("mkdir -p $output_dir");
     my $samtools = $self->{samtools_bin};
     my $srtd_bam;
-    my $max = $config->{max} ? $config->{max} : "250";
+    my $max_opt = $config->{max} ? "-d $config->{max}" : "";
+    my $ref_opt = $config->{ref} ? "-f $config->{ref}" : "";
     my $cleanup = $config->{cleanup} ? $config->{cleanup} : "0";
 
-    ## Sort input if needed
+    my $cmd = "samtools";
+
+    ## New Method
     if($config->{input}){
-        $self->_run_cmd("$samtools sort $config->{input} $output_dir/$fn\.srt");
-        $srtd_bam = "$output_dir/$fn\.srt.bam";
+    	$cmd = $cmd . "sort -m 5000000000 -o $config->{input} - | samtools mpileup";
+    	$srtd_bam = "-";
     } else {
-        $srtd_bam = "$config->{$srtd_bam}";
+    	$cmd = $cmd . "mpileup";
+    	$srtd_bam = $config->{srtd_bam};
     }
+    $cmd = $cmd . "-A $max_opt $ref_opt $srtd_bam > $output";
+    $self->_run_cmd($cmd);
+
+    ## Original Method. Now just piping sort into mpileup
+    ## Sort input if needed
+    #if($config->{input}){
+    #    $self->_run_cmd("$samtools sort $config->{input} $output_dir/$fn\.srt");
+    #    $srtd_bam = "$output_dir/$fn\.srt.bam";
+    #} else {
+    #    $srtd_bam = "$config->{$srtd_bam}";
+    #}
 
     ## Calculate mpileup
-    if($config->{ref}){
-        $self->_run_cmd("$samtools mpileup -d $max -Af $config->{ref} $srtd_bam > $output");
-    } else {
-        $self->_run_cmd("$samtools mpileup -d $max -A $srtd_bam > $output");
-    }        
-    if($cleanup == 1 && $config->{input}){
-        $self->_run_cmd("rm $output_dir/$fn\.srt.bam");
-    }
+    #if($config->{ref}){
+    #    $self->_run_cmd("$samtools mpileup -d $max -Af $config->{ref} $srtd_bam > $output");
+    #} else {
+    #    $self->_run_cmd("$samtools mpileup -d $max -A $srtd_bam > $output");
+    #} 
+
+    ## Shouldn't need this based on new method       
+    #if($cleanup == 1 && $config->{input}){
+    #   $self->_run_cmd("rm $output_dir/$fn\.srt.bam");
+    #}
     return $output;
 }
 =head2 prelim_filter
@@ -1625,13 +1642,13 @@ sub mpileup {
  Function: Removes M_M reads
  Returns : A bam will all other reads
  Args    : A hash containing potentially several config options:
-        input_bam     => bam
-        output_dir    => directory for output
-        keep_softclip => <0|1> [0] 1= Keep the soft clipped M_M reads 
-        overwrite     => <0|1> [1] 1= Overwrite the output if it already exists
-        split_bam     => <0|1> [0] 1= Split by by #seqs_per_file
-        seqs_per_file  => [50000000] 
-
+        input_bam     	=> bam
+        output_dir    	=> directory for output
+        keep_softclip 	=> <0|1> [0] 1= Keep the soft clipped M_M reads 
+        overwrite    	=> <0|1> [1] 1= Overwrite the output if it already exists
+        split_bam     	=> <0|1> [0] 1= Split by by #seqs_per_file
+        seqs_per_file 	=> [50000000] 
+        name_sort_input => <0|1> [0] 1= Resort input bam on names
 
 =cut
 sub prelim_filter {
@@ -1640,40 +1657,51 @@ sub prelim_filter {
     if($self->empty_chk({input => $input})==1){print STDERR "Warning: &prelim_filter input: $input is empty.\n"};
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->_run_cmd("mkdir -p $output_dir");
-    my $samtools = $config->{samtools_bin} ? $config->{samtools_bin} : $self->{samtools_bin};
     
     my $keep_softclip = $config->{keep_softclip} ? $config->{keep_softclip} : $self->{keep_softclip};
     my $overwrite = $config->{overwrite} ? $config->{overwrite} : $self->{overwrite};
     my $split_bam = $config->{split_bam} ? $config->{split_bam} : $self->{split_bam};
     my $seqs_per_file = $config->{seqs_per_file} ? $config->{seqs_per_file} : $self->{seqs_per_file};
-    
+    my $name_sort_input = $config->{name_sort_input} ? $config->{name_sort_input} : $self->{name_sort_input};
+
     my $i = 0;
     my $count = 0;
     my $output;
 
     ## Setup first output
-    my ($fn,$path,$suf)=fileparse($input,".bam");
-    if($split_bam==1){$output = "$output_dir/$fn\_$count\_prelim.bam";}
-    else {$output = "$output_dir/$fn\_prelim.bam";}
+    my ($fn,$path,$suf)=fileparse($input,("_resorted.bam",".srt.bam",".sort.bam",".bam"));
+    ## This is the original method. Now trying to pipe sort into samtools view and just parse that. Less intermediate files and quicker.
+    if($name_sort_input==1){
+    	$self->_run_cmd("samtools sort -m 5000000000 -n $input $output_dir/$fn\_resorted");
+    	$input = "$output_dir/$fn\_resorted.bam";
+    }
+    
+    ## Prime output name. If we are splitting a bam, add _#
+    if($split_bam==1){
+        $output = "$output_dir/$fn\_$count\_prelim.bam";
+    } else {
+        $output = "$output_dir/$fn\_prelim.bam";
+    }
+    
+    ## Prime first output onto outputlist
     my @output_list;
     push(@output_list, $output);
+    
     ## Check if the output exists already
     my $files_exist = 0; 
     if (-e $output){$files_exist=1;}
     if($files_exist == 1 && $overwrite == 0){print STDERR "Already found the output for &prelim_filter: $output.\n"; return $output;}
 
-    #print STDERR "&prelim_filter opening: $input\n"; # Testing purposes
-    #print STDERR "&prelim_filter output: $output\n"; # Testing purposes
     my $header = $self->_run_cmd("samtools view -H $input");
     open(my $in, "-|","samtools view $input") || die "Can't open: $input because: $!\n";
     open(my $out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
     print $out "$header";
 
     my $more_lines = 1;
-    while($more_lines) {
+    while($more_lines==1) {
         my $line1 = <$in>;
         my $line2 = <$in>;
-        ## Stop if we 
+        ## Stop if we have empty lines
         if(!$line1 || !$line2){
             $more_lines = 0;
             last;
@@ -1705,8 +1733,13 @@ sub prelim_filter {
             $i+=2;
         }
     }
-    close $out or die "Can't close: $out because: $!\n";
-    close $in  or die "Can't close: $in because: $!\n";
+    close $out or die "Can't close out: $out because: $!\n";
+    close $in  or die "Can't close in: $in because: $!\n";
+	
+	if($name_sort_input==1){
+    	$self->_run_cmd("rm $input");
+    }
+
     foreach my $foo (@output_list){print STDERR "$foo\n";}
     return \@output_list;
 }
@@ -1828,11 +1861,13 @@ sub new2 {
         $system{fs}=1;
         print STDERR "**** Warning: No system specified. Assuming we are on the filesystem. ****\n";
     }
+    ## Diag nodes
     my $diag = 
     {
         seqs_per_file => 50000000,
         keep_softclip => 1,
         paired_end => 1,
+        threads => 1,
         bin_dir => "/opt/lgtseek/bin/",
         ergatis_bin => "/opt/ergatis/bin/",
         prinseq_bin => "/opt/prinseq/bin/",
@@ -1847,12 +1882,13 @@ sub new2 {
         donor_lineage => "Bacteria",
         host_lineage => "Eukaryota"
     };
-    
+    # Clovr Box
     my $clovr = 
     {
         seqs_per_file => 50000000,
         keep_softclip => 1,
         paired_end => 1,
+        threads => 1,
         bin_dir => "/opt/lgtseek/bin/",
         ergatis_bin => "/opt/ergatis/bin/",
         prinseq_bin => "/opt/prinseq/bin/",
@@ -1867,13 +1903,20 @@ sub new2 {
         donor_lineage => "Bacteria",
         host_lineage => "Eukaryota"
     };
-
+    ## IGS Filesystem
     my $fs = 
     {
+        decrypt => 0,
+        Qsub => 0,
+        project => "jdhotopp-lab",
+        name_sort_input => 0,
         seqs_per_file => 50000000,
-        keep_softclip => 0,
-        split_bam => 0,
+        prelim_filter => 0,
+        split_bam => 1,
+        keep_softclip => 1,
+        lgt_coverage => 0,
         paired_end => 1,
+        threads => 1,
         bin_dir => "/local/projects-t3/HLGT/scripts/lgtseek/bin/",
         ergatis_bin => "/local/projects/ergatis/package-driley/bin/",
         prinseq_bin => "/home/ksieber/lib/prinseq-lite-0.18.1/",
@@ -1890,7 +1933,7 @@ sub new2 {
     };
 
     foreach my $key (%{$config->{options}}){
-        $self->{$key} = $config->{options}->{$key};
+        $self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : 0;
     }
 
     if($system{diag}==1){
