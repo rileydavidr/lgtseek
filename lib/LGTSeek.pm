@@ -1635,7 +1635,7 @@ sub mpileup {
     #}
     return $output;
 }
-=head2 prelim_filter
+=head2 prelim_filter	## NEED TO FIX: Change to filter out M_M, then resort and split.
 
  Title   : prelim_filter
  Usage   : my $potential_LGT_bam = $lgtseek->prelim_filter({input => <bam>})
@@ -1672,7 +1672,7 @@ sub prelim_filter {
     my ($fn,$path,$suf)=fileparse($input,("_resorted.bam",".srt.bam",".sort.bam",".bam"));
     ## This is the original method. Now trying to pipe sort into samtools view and just parse that. Less intermediate files and quicker.
     if($name_sort_input==1){
-    	$self->_run_cmd("samtools sort -m 5000000000 -n $input $output_dir/$fn\_resorted");
+    	$self->_run_cmd("samtools sort -m $self->{sort_mem} -n $input $output_dir/$fn\_resorted");     ## -m = # of bytes, google tranlate bytes -> GB.
     	$input = "$output_dir/$fn\_resorted.bam";
     }
     
@@ -1741,7 +1741,8 @@ sub prelim_filter {
     }
 
     foreach my $foo (@output_list){print STDERR "$foo\n";}
-    return \@output_list;
+    my @sort_out_list = sort @output_list;
+    return \@sort_out_list;
 }
 =head2 filter_bam_by_ids
 
@@ -1859,7 +1860,6 @@ sub new2 {
     ## If no system was passed with --options we assume we are on the filesystem and print a warning.
     if(!$config->{options}->{diag} && !$config->{options}->{clovr} && !$config->{options}->{fs}){
         $system{fs}=1;
-        print STDERR "**** Warning: No system specified. Assuming we are on the filesystem. ****\n";
     }
     ## Diag nodes
     my $diag = 
@@ -1906,11 +1906,15 @@ sub new2 {
     ## IGS Filesystem
     my $fs = 
     {
+    	sort_mem => "105000000000",
+    	sub_mem => "6G",
+    	output_list => 1,
+        overwrite => 0,
         decrypt => 0,
         Qsub => 0,
         project => "jdhotopp-lab",
         name_sort_input => 0,
-        seqs_per_file => 50000000,
+        seqs_per_file => "50000000",
         prelim_filter => 0,
         split_bam => 1,
         keep_softclip => 1,
