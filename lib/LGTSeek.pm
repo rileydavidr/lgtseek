@@ -1487,10 +1487,8 @@ sub splitBam {
             $i = 0;
         }
 
-        # If we haven't filled the current file yet just keep printing.
-        else {
-            print $ofh $line;
-        }
+        # If we haven't filled the current file yet just keep printing.      
+        print $ofh $line;
 
         # Increment the counter
         $i++;
@@ -1652,6 +1650,8 @@ sub mpileup {
 
 =cut
 sub prelim_filter {
+
+    ## General code scheme: (1) Filter out desired reads from the input. (2) Resort based on names. (3) Then finally split into chunks.
     my ($self,$config)=@_;
     my $input = $config->{input_bam} ? $config->{input_bam} : $self->{input_bam};
     if($self->empty_chk({input => $input})==1){print STDERR "Warning: &prelim_filter input: $input is empty.\n"};
@@ -1664,83 +1664,92 @@ sub prelim_filter {
     my $seqs_per_file = $config->{seqs_per_file} ? $config->{seqs_per_file} : $self->{seqs_per_file};
     my $name_sort_input = $config->{name_sort_input} ? $config->{name_sort_input} : $self->{name_sort_input};
 
-    my $i = 0;
-    my $count = 0;
-    my $output;
-
-    ## Setup first output
-    my ($fn,$path,$suf)=fileparse($input,("_resorted.bam",".srt.bam",".sort.bam",".bam"));
-    ## This is the original method. Now trying to pipe sort into samtools view and just parse that. Less intermediate files and quicker.
-    if($name_sort_input==1){
-    	$self->_run_cmd("samtools sort -m $self->{sort_mem} -n $input $output_dir/$fn\_resorted");     ## -m = # of bytes, google tranlate bytes -> GB.
-    	$input = "$output_dir/$fn\_resorted.bam";
-    }
-    
-    ## Prime output name. If we are splitting a bam, add _#
-    if($split_bam==1){
-        $output = "$output_dir/$fn\_$count\_prelim.bam";
-    } else {
-        $output = "$output_dir/$fn\_prelim.bam";
-    }
-    
-    ## Prime first output onto outputlist
-    my @output_list;
-    push(@output_list, $output);
-    
-    ## Check if the output exists already
-    my $files_exist = 0; 
-    if (-e $output){$files_exist=1;}
-    if($files_exist == 1 && $overwrite == 0){print STDERR "Already found the output for &prelim_filter: $output.\n"; return $output;}
-
+    my ($fn,$path,$suffix)=fileparse($input,('.srt.bam','.bam'));
     my $header = $self->_run_cmd("samtools view -H $input");
+    ## Check if the output exists already
+    ## $output isn't set right at this point in the scrip to check if the final output already exist. FIX later.
+    my $files_exist = 0; 
+    if (-e "$output_dir$fn\_0_prelim.bam"){$files_exist=1;}
+    if($files_exist == 1 && $overwrite == 0){
+    	print STDERR "Already found the output for &prelim_filter: $output_dir$fn\_0_prelim.bam\n";
+    	chomp(my @output_list = `find $output_dir -name '$fn\*_prelim.bam'`);
+    	return \@output_list;
+    }
+
+
+    ## (1). Prelim filter.
+    my $output;
+    my %ids_to_print;
     open(my $in, "-|","samtools view $input") || die "Can't open: $input because: $!\n";
-    open(my $out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
+    open(my $out, "| samtools view -S - -bo $output_dir$fn\_filtered.bam") || die "Can't open: $output_dir$fn because: $!\n";
     print $out "$header";
-
-    my $more_lines = 1;
-    while($more_lines==1) {
-        my $line1 = <$in>;
-        my $line2 = <$in>;
-        ## Stop if we have empty lines
-        if(!$line1 || !$line2){
-            $more_lines = 0;
-            last;
-        }
-        my ($flag1,$cigar1) = (split /\t/, $line1)[1,5];
-        my ($flag2,$cigar2) = (split /\t/, $line2)[1,5];
-        my $FLAG1 = $self->_parseFlag($flag1);
-        my $FLAG2 = $self->_parseFlag($flag2);
-        my $print = 0;
-        if($FLAG1->{'qunmapped'} || $FLAG1->{'munmapped'}){$print=1;}
+    while(<$in>){
+        my ($id,$flag,$cigar) = (split /\t/, $_)[0,1,5];
+        my $converted_flag = $self->_parseFlag($flag);
+        if($converted_flag->{'qunmapped'} || $converted_flag->{'munmapped'}){print $out "$_";}          ## If either read is unmapped print it
+        ## If the read is soft clipt >=24 bp, print it
         if($keep_softclip==1){
-            map {
-            #   if($_ =~ /(\d+M)(\d+S)/ || $_ =~ /(\d+S)(\d+M)/){$print=1;}
-                if($_ =~ /(\d+)M(\d+)S/ && $2 >= 24){$print=1;}
-                if($_ =~ /(\d+)S(\d+)M/ && $1 >= 24){$print=1;}
-            }($cigar1,$cigar2);
+            if($ids_to_print{$id}){
+                print $out "$_";
+                $ids_to_print{$id} = undef;
+            }
+            if($cigar =~ /(\d+)M(\d+)S/ && $2 >= 24){print $out "$_"; $ids_to_print{$id}++;}
+            if($cigar =~ /(\d+)S(\d+)M/ && $1 >= 24){print $out "$_"; $ids_to_print{$id}++;}
         }
-        if($split_bam==1 && $i >= $seqs_per_file){
-            close $out or die "Unable to close &prelim_filter output: $output\n";
-            $count += 1;
-            $output = "$output_dir/$fn\_$count\_prelim.bam";
-            open($out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
-            push(@output_list, $output);
-            print $out "$header"; 
-            $i=0;
-        }
-        if($print==1){
-            print $out "$line1$line2";
-            $i+=2;
+        if($ids_to_print{$id}>=1){
+            print $out "$_";
+            $ids_to_print{$id}++;
+            $ids_to_print{$id} = undef;
         }
     }
-    close $out or die "Can't close out: $out because: $!\n";
-    close $in  or die "Can't close in: $in because: $!\n";
-	
-	if($name_sort_input==1){
-    	$self->_run_cmd("rm $input");
+    close $in;
+    close $out;
+
+    my $step2_bam = "$output_dir$fn\_filtered.bam";
+    my $infh;
+    ## (2) Resort by name. 
+    if($name_sort_input==1){
+    	open($infh,"samtools sort -m $self->{sort_mem} -no $step2_bam - | samtools view - |") || die "Can't open: $step2_bam because: $!\n";
+    } else {
+    	open($infh,"-|","samtools view $step2_bam") || die "Can't open: $step2_bam because: $!\n";
     }
 
-    foreach my $foo (@output_list){print STDERR "$foo\n";}
+    ## (3) Split bam.
+    my @output_list;
+    if($split_bam==1){
+        my $i = 0;
+        my $count = 0;
+        my $output = "$output_dir/$fn\_$count\_prelim.bam";
+        #open(my $in, "-|","samtools view $step2_bam") || die "Can't open: $input because: $!\n";
+        open(my $out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
+        print $out "$header";
+        push(@output_list, $output);
+        my $more_lines = 1;
+        while($more_lines==1) {
+            my $line1 = <$infh>;
+            my $line2 = <$infh>;
+            ## Stop if we have empty lines
+            if(!$line1 || !$line2){
+                $more_lines = 0;
+                last;
+            }
+            if($i >= $seqs_per_file){
+                close $out or die "Unable to close &prelim_filter output: $output\n";
+                $count += 1;
+                $output = "$output_dir/$fn\_$count\_prelim.bam";
+                open($out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
+                push(@output_list, $output);
+                print $out "$header"; 
+                $i=0;
+            } 
+            print $out "$line1$line2";
+            $i += 2;   
+        }
+        close $out or die "Can't close out: $out because: $!\n";
+        close $infh  or die "Can't close in: $in because: $!\n";
+        $self->_run_cmd("rm $step2_bam");
+    }
+
     my @sort_out_list = sort @output_list;
     return \@sort_out_list;
 }
@@ -1906,14 +1915,14 @@ sub new2 {
     ## IGS Filesystem
     my $fs = 
     {
-    	sort_mem => "105000000000",
+    	sort_mem => "7500000000",
     	sub_mem => "6G",
     	output_list => 1,
         overwrite => 0,
         decrypt => 0,
         Qsub => 0,
         project => "jdhotopp-lab",
-        name_sort_input => 0,
+        name_sort_input => 1,
         seqs_per_file => "50000000",
         prelim_filter => 0,
         split_bam => 1,
