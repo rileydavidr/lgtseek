@@ -107,7 +107,7 @@ sub new {
 
 sub getGiTaxon {
     my($self,$config) = @_;
-
+    if($self->{verbose}==1){print STDERR "======== &getGiTaxon: Start ========\n";}
     # If we already have a gitaxon object we'll just return it.
     if(!$self->{gitaxon}) {
         # Apply any config options that came over.
@@ -123,7 +123,7 @@ sub getGiTaxon {
              'host' => $self->{taxon_host},
              'type' => 'nucleotide'});        
     }
-    
+    if($self->{verbose}==1){print STDERR "======== &getGiTaxon: Finished ========\n";}
     return $self->{gitaxon};
 
 }
@@ -148,6 +148,7 @@ sub prinseqFilterBam {
     my($self,$config) = @_;
     if(!$config->{input_bam}){die "Must pass &prinseqFilterBam and input =>\n"};
     if($self->empty_chk({input => $config->{input_bam}})==1){print STDERR "Warning: &prinseqFilterBam input: $config->{input} is empty.\n"}
+    if($self->{verbose}==1){print STDERR "======== &prinseqFilterBam: Start ========\n";}
     # Override if it is provided
     $self->{prinseq_bin} = $config->{prinseq_bin} ? $config->{prinseq_bin} :$self->{prinseq_bin};
     $self->{samtools_bin} = $self->{samtools_bin} ? $self->{samtools_bin} : 'samtools';
@@ -166,7 +167,7 @@ sub prinseqFilterBam {
     } else {
         die "Single end is currently not implemented\n";
     }
-    ## Return ->{count} && ->{file}
+    if($self->{verbose}==1){print STDERR "======== &prinseqFilterBam: Finished ========\n";}
     return $retval;
 }
 
@@ -293,7 +294,7 @@ sub sam2Fasta {
     my $bin = $self->{ergatis_bin};
 
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
-
+    if($self->{verbose}==1){print STDERR "======== &sam2Fasta: Start ========\n";}
     # Make sure the output directory is present
     $self->_run_cmd("mkdir -p $output_dir");
     
@@ -316,7 +317,7 @@ sub sam2Fasta {
     }
     
     $self->_run_cmd($cmd);
-
+    if($self->{verbose}==1){print STDERR "======== &sam2Fasta: Finished ========\n";}
     return $outfile;
 }
 
@@ -353,7 +354,7 @@ sub _run_cmd {
 =cut
 sub downloadSRA {
     my ($self, $config) = @_;
-
+    if($self->{verbose}==1){print STDERR "======== &downloadSRA: Start ========\n";}
     # Check for all the aspera related options
     $self->{aspera_host} = $config->{aspera_host} ? $config->{aspera_host} : $self->{aspera_host};
     $self->{aspera_user} = $config->{aspera_user} ? $config->{aspera_user} : $self->{aspera_user};    
@@ -443,6 +444,7 @@ sub downloadSRA {
      }   
 
     my @files = `find $output_dir -name *.sra`;
+    if($self->{verbose}==1){print STDERR "======== &downloadSRA: Finished ========\n";}
     return \@files;
 }
 
@@ -458,7 +460,7 @@ sub downloadSRA {
 
 sub downloadCGHub {
     my ($self, $config) = @_;
-
+    if($self->{verbose}==1){print STDERR "======== &downloadCGHub: Start ========\n";}
     # Check for all the genetorrent related options
     $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->{genetorrent_path} = $self->{genetorrent_path} ? $self->{genetorrent_path} : '/opt/genetorrent/bin';
@@ -525,7 +527,7 @@ sub downloadCGHub {
         'bai_files' => \@bai,
         'gto_files' => \@gto
     };
-    
+    if($self->{verbose}==1){print STDERR "======== &downloadCGHub: Finished ========\n";}
     return $files;
 }
 
@@ -544,7 +546,7 @@ sub dumpFastq {
     my($self,$config) = @_;
 
     $self->{sratoolkit_path} = $config->{sratoolkit_path} ? $config->{sratoolkit_path} : $self->{sratoolkit_path};
-
+    if($self->{verbose}==1){print STDERR "======== &dumpFastq: Start ========\n";}
     # If we don't have a path provided we'll hope it's in our path.
     my $fastqdump_bin = $self->{sratoolkit_path} ? "$self->{sratoolkit_path}/fastq-dump" : "fastq-dump";
 
@@ -592,6 +594,7 @@ sub dumpFastq {
     if($files[0] =~ /_\d.fastq/) {
         $retval->{paired_end} = 1;
     }
+    if($self->{verbose}==1){print STDERR "======== &dumpFastq: Finished ========\n";}
     return $retval;
 }
 
@@ -618,7 +621,7 @@ sub dumpFastq {
 
 sub runBWA {
     my($self,$config) = @_;
-
+    if($self->{verbose}==1){print STDERR "======== &runBWA: Start ========\n";}
     $self->{ergatis_bin} = $config->{ergatis_bin} ? $config->{ergatis_bin} : $self->{ergatis_bin};
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     # Check for a bwa path. If we don't have one we'll just hope it's in our global path.
@@ -697,6 +700,7 @@ sub runBWA {
         map {chomp $_;} @files; 
         print STDERR join("\n",@files);
         print STDERR "\n";
+        if($self->{verbose}==1){print STDERR "======== &runBWA: Finished ========\n";}
         return \@files;
     }
 }
@@ -714,13 +718,13 @@ sub runBWA {
 
 sub bwaPostProcess {
     my ($self, $config) = @_;
-
+    if($self->{verbose}==1){print STDERR "======== &bwaPostProcess: Start ========\n";}
     my $retval;
     # Do we have both donor and host bams?
     if($config->{donor_bams} && $config->{host_bams}) {
         $retval = $self->_bwaPostProcessDonorHostPaired($config);
     }
-    
+    if($self->{verbose}==1){print STDERR "======== &bwaPostProcess: Start ========\n";}
     return $retval;
 }
 
@@ -820,28 +824,6 @@ sub _bwaPostProcessDonorPaired {
         $more_lines = $obj->{more_lines};
         $dr1_line = $obj->{r1_line};
         $dr2_line = $obj->{r2_line};
-
-
-#        if($class_to_file->{$classes_both->{$paired_class}."_donor"}) {
-#            print STDERR "Printing to ".$classes_both->{$paired_class}."_donor $paired_class\n$dr1_line$dr2_line";
-#            print {$class_to_file->{$classes_both->{$paired_class}."_donor"}} "$dr1_line\n$dr2_line\n";
-#        }
-#        if($class_to_file->{$classes_both->{$paired_class}."_host"}) {
-#            print {$class_to_file->{$classes_both->{$paired_class}."_host"}} "$hr1_line\n$hr2_line\n";
-#        }
-
-#        if($classes_both->{$paired_class} eq 'lgt') {
-#            print STDERR "Processing $hr1_line$hr2_line$dr1_line$dr2_line";
-#        }
-#        if($classes_both->{$paired_class}) {
-#            $class_counts->{$classes_both->{$paired_class}}++;
-#            my @lines;
-#            map {push(@lines, "$_: $class_counts->{$_}")} keys %$class_counts;
-#            map {print  "\r$_: $class_counts->{$_}"} keys %$class_counts;
-#                   print "\r".join(' ',@lines);
-                
-                #print STDERR "Line $line_num donor class: $dclass\nHost class: $hclass\nCombined class: $paired_class\n";
- #       }
     }
 }
 
@@ -1127,7 +1109,7 @@ sub blast2lca {
     my ($self,$config) = @_;
 
     my $gi2tax = $self->getGiTaxon({});
-
+    if($self->{verbose}==1){print STDERR "======== &blast2lca: Start ========\n";}
     open IN, "<$config->{blast}" or die "Unable to open $config->{blast}\n";
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->_run_cmd("mkdir -p $output_dir");
@@ -1154,11 +1136,6 @@ sub blast2lca {
         my $taxon =  $gi2tax->getTaxon($fields[1]);
         $taxon->{scientific_name} =~ /^(\w+) /;
         my $genera = $1;
-
-
-#        if(&filter_genera($genera)) {
-#            next;
-#        }
         if(!defined($id)) {
             $id = $new_id;
             $evalue = $fields[10];
@@ -1188,6 +1165,7 @@ sub blast2lca {
     my $newvals = &_prep_lca_print($hits_by_readname,\@vals);
     print OUT join("\t",@$newvals);
     print OUT "\n";
+    if($self->{verbose}==1){print STDERR "======== &blast2lca: Finished ========\n";}
     return "$output_dir/$name\_lca.out";
 }
 
@@ -1280,6 +1258,7 @@ sub _find_lca {
 sub bestBlast2 {
     my ($self,$config) = @_;
     my $fasta;
+    if($self->{verbose}==1){print STDERR "======== &bestBlast2: Start ========\n";}
     # Convert bams to fasta
     if($config->{'bam'}) {
         my $newfasta = $self->sam2Fasta({
@@ -1293,12 +1272,6 @@ sub bestBlast2 {
     if($config->{'fasta'}) {
         $fasta = $config->{fasta};
     }
-#    my $blast_bin = '';
-#    if($config->{blast_bin}) {
-        
-        #$blast_bin = $config->{"blast_bin"}." -d $config->{'blast_db'} -e 1e-5 -m8 -T F ";
-#    }  
-
     my ($name,$directories,$suffix) = fileparse($fasta,qr/\.[^.]*/);
     open OUT, ">$self->{output_dir}/$name\_filtered_blast.list" or die "Unable to open $self->{output_dir}/$name\_filtered_blast.list\n";  
     my @outputs;
@@ -1320,6 +1293,7 @@ sub bestBlast2 {
     close OUT;
 
     $files->{list_file} = "$self->{output_dir}/$name\_filtered_blast.list";
+    if($self->{verbose}==1){print STDERR "======== &bestBlast2: Finished ========\n";}
     return $files;
 }
 
@@ -1435,6 +1409,7 @@ sub splitBam {
     if(!$config->{input}){die "Must give &splitBam an input =>\n";}
     if($self->empty_chk({input => $config->{input}})==1){print STDERR "Warning: &split_bam input: $config->{input} is empty.\n";}
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+   	if($self->{verbose}==1){print STDERR "======== &splitBam: Start ========\n";}
     $self->_run_cmd("mkdir -p $output_dir");
     my $seqs_per_file = $config->{seqs_per_file} ? $config->{seqs_per_file} : 10000;
     my $samtools = $self->{samtools_bin};
@@ -1496,6 +1471,7 @@ sub splitBam {
     close $ofh;
     print STDERR "Split $config->{input} into $count bams, each with $seqs_per_file sequences per bam.\n";
     my $files = \@outfiles;
+    if($self->{verbose}==1){print STDERR "======== &splitBam: Finished ========\n";}
     return $files;
 }
 
@@ -1549,6 +1525,7 @@ sub decrypt {
 	if(!$config->{input} || $config->{input}!~/\.bam\.gpg$/){die "Error: Must pass an encrypted .bam.gpg to this subroutine.\n";}
 	if(!$config->{url} && !$config->{key}){die "Must give an url to download the key from or the path to the key.\n";}
 	my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+	if($self->{verbose}==1){print STDERR "======== &Decrypt: Start ========\n";}
     $self->_run_cmd("mkdir -p $output_dir");
 	my($bam,$path,$suffix) = fileparse($config->{input},'.gpg');
     my $key;
@@ -1563,6 +1540,7 @@ sub decrypt {
 	my $outfile="$output_dir/$bam";
 	$self->_run_cmd("rm $config->{input}");
 	$self->_run_cmd("rm $key");
+		if($self->{verbose}==1){print STDERR "======== &Decrypt: Finished ========\n";}
 	return $outfile;
 }
 
@@ -1590,6 +1568,7 @@ sub mpileup {
     my($fn,$path,$suffix) = fileparse($config->{input},'.bam');
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     my $output = "$output_dir/$fn\.mpileup";
+    if($self->{verbose}==1){print STDERR "======== &mpileup: Start ========\n";}
     if(-e $output && $overwrite==0){print STDERR "Already found the output for &mpileup: $output\n"; return $output;}
     $self->_run_cmd("mkdir -p $output_dir");
     my $samtools = $self->{samtools_bin};
@@ -1610,27 +1589,7 @@ sub mpileup {
     }
     $cmd = $cmd . "-A $max_opt $ref_opt $srtd_bam > $output";
     $self->_run_cmd($cmd);
-
-    ## Original Method. Now just piping sort into mpileup
-    ## Sort input if needed
-    #if($config->{input}){
-    #    $self->_run_cmd("$samtools sort $config->{input} $output_dir/$fn\.srt");
-    #    $srtd_bam = "$output_dir/$fn\.srt.bam";
-    #} else {
-    #    $srtd_bam = "$config->{$srtd_bam}";
-    #}
-
-    ## Calculate mpileup
-    #if($config->{ref}){
-    #    $self->_run_cmd("$samtools mpileup -d $max -Af $config->{ref} $srtd_bam > $output");
-    #} else {
-    #    $self->_run_cmd("$samtools mpileup -d $max -A $srtd_bam > $output");
-    #} 
-
-    ## Shouldn't need this based on new method       
-    #if($cleanup == 1 && $config->{input}){
-    #   $self->_run_cmd("rm $output_dir/$fn\.srt.bam");
-    #}
+    if($self->{verbose}==1){print STDERR "======== &mpileup: Finished ========\n";}
     return $output;
 }
 =head2 prelim_filter	## NEED TO FIX: Change to filter out M_M, then resort and split.
@@ -1658,19 +1617,20 @@ sub prelim_filter {
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->_run_cmd("mkdir -p $output_dir");
     
-    my $keep_softclip = $config->{keep_softclip} ? $config->{keep_softclip} : $self->{keep_softclip};
-    my $overwrite = $config->{overwrite} ? $config->{overwrite} : $self->{overwrite};
-    my $split_bam = $config->{split_bam} ? $config->{split_bam} : $self->{split_bam};
+    my $keep_softclip = defined $config->{keep_softclip} ? $config->{keep_softclip} : $self->{keep_softclip};
+    my $overwrite = defined $config->{overwrite} ? $config->{overwrite} : $self->{overwrite};
+    my $split_bam = defined $config->{split_bam} ? $config->{split_bam} : $self->{split_bam};
+    my $prelim_filter = defined $config->{prelim_filter} ? $config->{prelim_filter} : $self->{prelim_filter};
     my $seqs_per_file = $config->{seqs_per_file} ? $config->{seqs_per_file} : $self->{seqs_per_file};
-    my $name_sort_input = $config->{name_sort_input} ? $config->{name_sort_input} : $self->{name_sort_input};
-
+    my $name_sort_input = defined $config->{name_sort_input} ? $config->{name_sort_input} : $self->{name_sort_input};
+    if($self->{verbose}==1){print STDERR "======== &prelim_filter: Start ========\n";}
     my ($fn,$path,$suffix)=fileparse($input,('.srt.bam','.bam'));
     my $header = $self->_run_cmd("samtools view -H $input");
     ## Check if the output exists already
     ## $output isn't set right at this point in the scrip to check if the final output already exist. FIX later.
     my $files_exist = 0; 
     if (-e "$output_dir$fn\_0_prelim.bam"){$files_exist=1;}
-    if($files_exist == 1 && $overwrite == 0){
+    if ($files_exist == 1 && $overwrite == 0){
     	print STDERR "Already found the output for &prelim_filter: $output_dir$fn\_0_prelim.bam\n";
     	chomp(my @output_list = `find $output_dir -name '$fn\*_prelim.bam'`);
     	return \@output_list;
@@ -1678,50 +1638,59 @@ sub prelim_filter {
 
 
     ## (1). Prelim filter.
-    my $output;
-    my %ids_to_print;
-    open(my $in, "-|","samtools view $input") || die "Can't open: $input because: $!\n";
-    open(my $out, "| samtools view -S - -bo $output_dir$fn\_filtered.bam") || die "Can't open: $output_dir$fn because: $!\n";
-    print $out "$header";
-    while(<$in>){
-        my ($id,$flag,$cigar) = (split /\t/, $_)[0,1,5];
-        my $converted_flag = $self->_parseFlag($flag);
-        if($converted_flag->{'qunmapped'} || $converted_flag->{'munmapped'}){print $out "$_";}          ## If either read is unmapped print it
-        ## If the read is soft clipt >=24 bp, print it
-        if($keep_softclip==1){
-            if($ids_to_print{$id}){
-                print $out "$_";
-                $ids_to_print{$id} = undef;
-            }
-            if($cigar =~ /(\d+)M(\d+)S/ && $2 >= 24){print $out "$_"; $ids_to_print{$id}++;}
-            if($cigar =~ /(\d+)S(\d+)M/ && $1 >= 24){print $out "$_"; $ids_to_print{$id}++;}
-        }
-        if($ids_to_print{$id}>=1){
-            print $out "$_";
-            $ids_to_print{$id}++;
-            $ids_to_print{$id} = undef;
-        }
-    }
-    close $in;
-    close $out;
-
+    ## Check to see if prelim output exists already
     my $step2_bam = "$output_dir$fn\_filtered.bam";
-    my $infh;
-    ## (2) Resort by name. 
-    if($name_sort_input==1){
-    	open($infh,"samtools sort -m $self->{sort_mem} -no $step2_bam - | samtools view - |") || die "Can't open: $step2_bam because: $!\n";
-    } else {
-    	open($infh,"-|","samtools view $step2_bam") || die "Can't open: $step2_bam because: $!\n";
+    if (-e "$step2_bam") {$files_exist=1;}
+    if ($files_exist==1 && $overwrite==0){
+    	print STDERR "Already found &prelim_filter output, skipping to sort and split: $step2_bam.\n";
+    	$prelim_filter=0;
     }
-
-    ## (3) Split bam.
+	## Prelim filter Analysis.
+    if($prelim_filter==1){
+    	if($self->{verbose}==1){print STDERR "======== &prelim_filter: Filter ========\n";}
+	    my $output;
+	    my %ids_to_print;
+	    open(my $in, "-|","samtools view $input") || die "Can't open &prelim_filter input: $input because: $!\n";
+	    open(my $out, "| samtools view -S - -bo $step2_bam") || die "Can't open &prelim_filter output: $step2_bam because: $!\n";
+	    print $out "$header";
+	    while(<$in>){
+	        my ($id,$flag,$cigar,$sequence) = (split /\t/, $_)[0,1,5,9];
+	        next if ($id=~/null/ && $sequence=~/\*/);
+	        my $converted_flag = $self->_parseFlag($flag);
+	        if($converted_flag->{'qunmapped'} || $converted_flag->{'munmapped'}){print $out "$_";}          ## If either read is unmapped print it
+	        if($keep_softclip==1){ 																			## If the read is soft clipt >=24 bp, print it
+	            if($ids_to_print{$id}){
+	                print $out "$_";
+	                $ids_to_print{$id} = undef;
+	            }
+	            if($cigar =~ /(\d+)M(\d+)S/ && $2 >= 24){print $out "$_"; $ids_to_print{$id}++;}
+	            if($cigar =~ /(\d+)S(\d+)M/ && $1 >= 24){print $out "$_"; $ids_to_print{$id}++;}
+	        }
+	        if($self->{paired_end}==0){$ids_to_print{$id} = undef;}											## Don't remember id's to print if single_end reads.
+	    }
+	    close $in || die "Can't close &prelim_filter input: $input because: $!\n";
+	    close $out || die "Can't close &prelim_filter output: $step2_bam because: $!\n";
+	    print STDERR 
+	}
+    
     my @output_list;
+    
+    ## (2 & 3) Split bam.
     if($split_bam==1){
+        ## (2) Resort by name.
+        my $infh; 
+    	if($name_sort_input==1 && $self->{paired_end}==1){
+    		open($infh,"samtools sort -@ $self->{threads} -m $self->{sort_mem} -no $step2_bam - | samtools view - |") || die "Can't open: $step2_bam because: $!\n";
+    		if($self->{verbose}==1){print STDERR "======== &prelim_filter: Sort ========\n";}
+    	} else {
+    		open($infh,"-|","samtools view $step2_bam") || die "Can't open: $step2_bam because: $!\n";
+    	}
         my $i = 0;
         my $count = 0;
         my $output = "$output_dir/$fn\_$count\_prelim.bam";
         #open(my $in, "-|","samtools view $step2_bam") || die "Can't open: $input because: $!\n";
         open(my $out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
+        if($self->{verbose}==1){print STDERR "======== &prelim_filter: Split ========\n";}
         print $out "$header";
         push(@output_list, $output);
         my $more_lines = 1;
@@ -1746,11 +1715,18 @@ sub prelim_filter {
             $i += 2;   
         }
         close $out or die "Can't close out: $out because: $!\n";
-        close $infh  or die "Can't close in: $in because: $!\n";
         $self->_run_cmd("rm $step2_bam");
+    } else {																									## If we didn't split the output
+    	if($name_sort_input==1){																			
+    		$self->_run_cmd("samtools sort -n -m $self->{sort_mem} $step2_bam $output_dir/$fn\_prelim");		## (2) Resort by name
+    		push(@output_list, "$output_dir/$fn\_prelim.bam");
+    		$self->_run_cmd("rm $step2_bam");
+    	} else {
+    		push(@output_list, $step2_bam);																		## Return filtered bam if we dont' split and name sort
+    	}									
     }
-
     my @sort_out_list = sort @output_list;
+    if($self->{verbose}==1){print STDERR "======== &prelim_filter: Finished ========\n";}
     return \@sort_out_list;
 }
 =head2 filter_bam_by_ids
@@ -1773,6 +1749,7 @@ sub filter_bam_by_ids {
     if(!$config->{input_bam}){die "Error: Must pass &filter_bam_by_ids an input_bam => <BAM_TO_FILTER>\n"};
     if($self->empty_chk({ input => "$config->{input_bam}" })==1){print STDERR "Warning: Can not filter ids from an empty input bam: $config->{input_bam}\n"; return {count=>0,file=>$config->{input_bam}};}
     if(!$config->{good_list} && !$config->{bad_list}){die "Error: Must pass &filter_bam_by_ids a file with a list of reads to filter on. Use good_list => || bad_list => \n";}
+    if($self->{verbose}==1){print STDERR "======== &filter_bam_by_ids: Start ========\n";}
     ## Setup hash of ids
     my $good_ids = {};
     my $bad_ids = {};
@@ -1799,6 +1776,7 @@ sub filter_bam_by_ids {
     close $fh;
     my $count=0;
     foreach my $keys (keys %found_ids){$count++;}
+    if($self->{verbose}==1){print STDERR "======== &filter_bam_by_ids: Finished ========\n";}
     return {
         count => $count,
         file => $out
@@ -1851,71 +1829,37 @@ sub empty_chk {
 =head2 new2
 
  Title   : new2
- Usage   : my $lgtseek = LGTSeek->new2({options => \%options})
+ Usage   : my $lgtseek = LGTSeek->new2(\%options)
  Function: Creates a new LGTSeek object taking the --options and default hardcoded paths. --diag|clovr|fs= <0|1> 
  Returns : An instance of LGTSeek
- Args    : options => \%options
 
 =cut
 sub new2 {
     my ($class,$config)=@_;
-    my $self = $config;
+    #my $self = $config;
+    my $self;
     
+    ###########################################
+    ## Copy config default values into self 
+    ## aka $lgtseek = "--options"
+    foreach my $key (keys %$config){
+    	$self->{$key} = $config->{$key};
+    }
+
     my %system;
-    $system{diag}  = $config->{options}->{diag} ? $config->{options}->{diag} : 0;
-    $system{clovr} = $config->{options}->{clovr} ? $config->{options}->{clovr} : 0;
-    $system{fs}    = $config->{options}->{fs} ? $config->{options}->{fs} : 0;
+    $system{diag}  = defined $config->{diag}  ? "$config->{diag}"   : "0";
+    $system{clovr} = defined $config->{clovr} ? "$config->{clovr}"  : "0";
+    $system{fs}    = defined $config->{fs}    ? "$config->{fs}"     : "0";
     
     ## If no system was passed with --options we assume we are on the filesystem and print a warning.
-    if(!$config->{options}->{diag} && !$config->{options}->{clovr} && !$config->{options}->{fs}){
+    if(!$config->{diag} && !$config->{clovr} && !$config->{fs}){
         $system{fs}=1;
     }
-    ## Diag nodes
-    my $diag = 
+    ## Global Defaults
+    my $global_defaults = 
     {
-        seqs_per_file => 50000000,
-        keep_softclip => 1,
-        paired_end => 1,
-        threads => 1,
-        bin_dir => "/opt/lgtseek/bin/",
-        ergatis_bin => "/opt/ergatis/bin/",
-        prinseq_bin => "/opt/prinseq/bin/",
-        samtools_bin => "samtools",
-        split_bac_list => "/mnt/staging/data/lgt_seq/mnt/references/split_refseq_bacteria/split_bacteria_ref.list",
-        hg19_ref => "/mnt/staging/data/lgt_seq/mnt/references/hg19/dna/hg19.fa",
-        refseq_list => "/mnt/staging/data/lgt_seq/mnt/references/refseq_bacteria_BWA_INDEXED_20110831/refseq.list",
-        taxon_host => "cloud-128-152.diagcomputing.org:10001",
-        taxon_dir => "/mnt/staging/data/lgt_seq/mnt/references/taxonomy",
-        taxon_idx_dir => "/mnt/staging/data/lgt_seq/mnt/references/taxonomy",
-        path_to_blastdb => "/mnt/staging/data/ncbi-nt/nt",
-        donor_lineage => "Bacteria",
-        host_lineage => "Eukaryota"
-    };
-    # Clovr Box
-    my $clovr = 
-    {
-        seqs_per_file => 50000000,
-        keep_softclip => 1,
-        paired_end => 1,
-        threads => 1,
-        bin_dir => "/opt/lgtseek/bin/",
-        ergatis_bin => "/opt/ergatis/bin/",
-        prinseq_bin => "/opt/prinseq/bin/",
-        samtools_bin => "samtools",
-        split_bac_list => "/mnt/references/split_refseq_bacteria/split_bacteria_ref.list",
-        hg19_ref => "/mnt/references/hg19/dna/hg19.fa",
-        refseq_list => "/mnt/references/refseq_bacteria_BWA_INDEXED_20110831/refseq.list",
-        taxon_host => "cloud-128-152.diagcomputing.org:10001",                      
-        taxon_dir => "/mnt/references/taxonomy/20120720_135302/",
-        taxon_idx_dir => "/mnt/references/taxonomy/20120720_135302/",
-        path_to_blastdb => "/mnt/scratch/ksieber/ref/refseq_bacteria_merged.fna",  ## FIX this
-        donor_lineage => "Bacteria",
-        host_lineage => "Eukaryota"
-    };
-    ## IGS Filesystem
-    my $fs = 
-    {
-    	sort_mem => "7500000000",
+    	verbose => 1,
+    	sort_mem => "3000000000",											## Titrated out, takes ~4.5 G mem to run 2500000000. Fairly linear
     	sub_mem => "6G",
     	output_list => 1,
         overwrite => 0,
@@ -1930,10 +1874,48 @@ sub new2 {
         lgt_coverage => 0,
         paired_end => 1,
         threads => 1,
+        samtools_bin => "samtools",
+        donor_lineage => "Bacteria",
+        host_lineage => "Eukaryota"
+    };
+    foreach my $key (keys %$global_defaults){
+        $self->{$key} = defined $config->{$key} ? "$config->{$key}" : "$global_defaults->{$key}";
+    }
+
+    ## Diag nodes
+    my $diag = 
+    {
+        bin_dir => "/opt/lgtseek/bin/",
+        ergatis_bin => "/opt/ergatis/bin/",
+        prinseq_bin => "/opt/prinseq/bin/",
+        split_bac_list => "/mnt/staging/data/lgt_seq/mnt/references/split_refseq_bacteria/split_bacteria_ref.list",
+        hg19_ref => "/mnt/staging/data/lgt_seq/mnt/references/hg19/dna/hg19.fa",
+        refseq_list => "/mnt/staging/data/lgt_seq/mnt/references/refseq_bacteria_BWA_INDEXED_20110831/refseq.list",
+        taxon_host => "cloud-128-152.diagcomputing.org:10001",
+        taxon_dir => "/mnt/staging/data/lgt_seq/mnt/references/taxonomy",
+        taxon_idx_dir => "/mnt/staging/data/lgt_seq/mnt/references/taxonomy",
+        path_to_blastdb => "/mnt/staging/data/ncbi-nt/nt",
+    };
+    # Clovr Box
+    my $clovr = 
+    {
+        bin_dir => "/opt/lgtseek/bin/",
+        ergatis_bin => "/opt/ergatis/bin/",
+        prinseq_bin => "/opt/prinseq/bin/",
+        split_bac_list => "/mnt/references/split_refseq_bacteria/split_bacteria_ref.list",
+        hg19_ref => "/mnt/references/hg19/dna/hg19.fa",
+        refseq_list => "/mnt/references/refseq_bacteria_BWA_INDEXED_20110831/refseq.list",
+        taxon_host => "cloud-128-152.diagcomputing.org:10001",                      
+        taxon_dir => "/mnt/references/taxonomy/20120720_135302/",
+        taxon_idx_dir => "/mnt/references/taxonomy/20120720_135302/",
+        path_to_blastdb => "/mnt/scratch/ksieber/ref/refseq_bacteria_merged.fna",  ## FIX this
+    };
+    ## IGS Filesystem
+    my $fs = 
+    {
         bin_dir => "/local/projects-t3/HLGT/scripts/lgtseek/bin/",
         ergatis_bin => "/local/projects/ergatis/package-driley/bin/",
         prinseq_bin => "/home/ksieber/lib/prinseq-lite-0.18.1/",
-        samtools_bin => "samtools",
         split_bac_list => "/local/projects-t3/HLGT/references/split_bacteria/all_bacteria.list",
         hg19_ref => "/local/projects-t3/HLGT/references/hg19/hg19.fa",
         refseq_list => "/local/projects-t3/HLGT/references/refseq_bacteria_BWA_INDEXED_20110831/refseq.list",
@@ -1941,30 +1923,22 @@ sub new2 {
         taxon_dir => "/local/db/repository/ncbi/blast/20120414_001321/taxonomy/",
         taxon_idx_dir => "/local/projects-t3/HLGT/idx_dir/20120414",
         path_to_blastdb => "/local/db/repository/ncbi/blast/20120414_001321/nt/nt",
-        donor_lineage => "Bacteria",
-        host_lineage => "Eukaryota"
     };
-
-    foreach my $key (%{$config->{options}}){
-        $self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : 0;
-    }
-
     if($system{diag}==1){
         foreach my $key (keys %$diag){
-            $self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $diag->{$key};
+            $self->{$key} = defined $config->{$key} ? "$config->{$key}" : "$diag->{$key}";
         }
     }
     if($system{clovr}==1){
         foreach my $key (keys %$clovr){
-            $self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $clovr->{$key};
+            $self->{$key} = defined $config->{$key} ? "$config->{$key}" : "$clovr->{$key}";
         }
     }
     if($system{fs}==1){
         foreach my $key (keys %$fs){
-            $self->{$key} = $config->{options}->{$key} ? $config->{options}->{$key} : $fs->{$key};
+            $self->{$key} = defined $config->{$key} ? "$config->{$key}" : "$fs->{$key}";
         }
     }
-
 
     bless $self;
     return $self;
