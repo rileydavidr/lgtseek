@@ -202,6 +202,7 @@ sub _prinseqFilterPaired {
         return $filtered;
     } else {
         # Generate concatenated fastq files for prinseq derep filtering
+        ## Need to fix this to incorporate sam2fasta.pm or &
         my $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=1 --output_file=$output_dir/$name\_combined.fastq";
         print STDERR "$cmd\n";
         $self->_run_cmd($cmd);
@@ -280,7 +281,7 @@ sub _prinseqFilterPaired {
 }
 
 =head2 sam2Fasta
-
+## This needs to be updated to incorporate the sam2fasta.pm into LGTSeek.pm OR use sam2fastaconverter.pm
  Title   : sam2Fasta
  Usage   : my $fastas = $LGTSeek->sam2Fasta({'input' => '/path/to/file.bam'...})
  Function: Convert a bam/sam file to a fasta file
@@ -448,6 +449,72 @@ sub downloadSRA {
     return \@files;
 }
 
+=head2 dumpFastq
+
+ Title   : dumpFastq
+ Usage   : $lgtseek->dumpFastq(({'sra_file' => 'SRX01234'})
+ Function: Run the sratoolkit program dump-fastq
+ Returns : An object with a path and basename of the output as well as a list of output files
+ Args    : An object with element 'sra_file' and optionally the path to the sratoolkit install
+
+=cut
+
+sub dumpFastq {
+    my($self,$config) = @_;
+
+    $self->{sratoolkit_path} = $config->{sratoolkit_path} ? $config->{sratoolkit_path} : $self->{sratoolkit_path};
+    if($self->{verbose}==1){print STDERR "======== &dumpFastq: Start ========\n";}
+    # If we don't have a path provided we'll hope it's in our path.
+    my $fastqdump_bin = $self->{sratoolkit_path} ? "$self->{sratoolkit_path}/fastq-dump" : "fastq-dump";
+
+    $config->{sra_file} =~ s/\/\//\//g;
+    # Need to pull the version of the sratoolkit to determine if we need the --split-3 parameter.
+    my $ret = `$fastqdump_bin -V`;
+    my $version;
+    my $cutoff_version;
+    if($ret =~ /fastq-dump : ([\d.]+)/) {
+        $version = version->parse($1);
+        $cutoff_version = version->parse('2.1.0');
+    }
+    else {
+        die "$? $ret $fastqdump_bin\n";
+    }
+    if($version > $cutoff_version) {
+
+        $fastqdump_bin .= " --split-3 ";
+    }
+    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    if(!$self->{output_dir}) {
+        die "Need to specify an output_dir in order to download from the sra\n";
+    }
+
+    my ($name,$path,$suff) = fileparse($config->{sra_file},".sra");
+    chomp $name;
+    my $res = $self->_run_cmd("find $self->{output_dir} -maxdepth 1 -name '$name*.fastq'");
+    my @files = split(/\n/,$res);
+
+    if(!@files && !$config->{overwrite}) {
+        my $cmd = "$fastqdump_bin -O $self->{output_dir} $config->{sra_file}";
+        $self->_run_cmd($cmd);
+        my $res = $self->_run_cmd("find $self->{output_dir} -maxdepth 1 -name '$name*.fastq'");
+        @files = split(/\n/,$res);
+    }
+
+    print STDERR "@files\n";
+
+    my $retval = {
+        'files' => \@files,
+        'path' => $self->{output_dir},
+        'basename' => $name,
+        'paired_end' => 0
+    };
+    if($files[0] =~ /_\d.fastq/) {
+        $retval->{paired_end} = 1;
+    }
+    if($self->{verbose}==1){print STDERR "======== &dumpFastq: Finished ========\n";}
+    return $retval;
+}
+
 =head2 downloadCGHub
 
  Title   : downloadCGHub
@@ -529,73 +596,6 @@ sub downloadCGHub {
     };
     if($self->{verbose}==1){print STDERR "======== &downloadCGHub: Finished ========\n";}
     return $files;
-}
-
-
-=head2 dumpFastq
-
- Title   : dumpFastq
- Usage   : $lgtseek->dumpFastq(({'sra_file' => 'SRX01234'})
- Function: Run the sratoolkit program dump-fastq
- Returns : An object with a path and basename of the output as well as a list of output files
- Args    : An object with element 'sra_file' and optionally the path to the sratoolkit install
-
-=cut
-
-sub dumpFastq {
-    my($self,$config) = @_;
-
-    $self->{sratoolkit_path} = $config->{sratoolkit_path} ? $config->{sratoolkit_path} : $self->{sratoolkit_path};
-    if($self->{verbose}==1){print STDERR "======== &dumpFastq: Start ========\n";}
-    # If we don't have a path provided we'll hope it's in our path.
-    my $fastqdump_bin = $self->{sratoolkit_path} ? "$self->{sratoolkit_path}/fastq-dump" : "fastq-dump";
-
-    $config->{sra_file} =~ s/\/\//\//g;
-    # Need to pull the version of the sratoolkit to determine if we need the --split-3 parameter.
-    my $ret = `$fastqdump_bin -V`;
-    my $version;
-    my $cutoff_version;
-    if($ret =~ /fastq-dump : ([\d.]+)/) {
-        $version = version->parse($1);
-        $cutoff_version = version->parse('2.1.0');
-    }
-    else {
-        die "$? $ret $fastqdump_bin\n";
-    }
-    if($version > $cutoff_version) {
-
-        $fastqdump_bin .= " --split-3 ";
-    }
-    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
-    if(!$self->{output_dir}) {
-        die "Need to specify an output_dir in order to download from the sra\n";
-    }
-
-    my ($name,$path,$suff) = fileparse($config->{sra_file},".sra");
-    chomp $name;
-    my $res = $self->_run_cmd("find $self->{output_dir} -maxdepth 1 -name '$name*.fastq'");
-    my @files = split(/\n/,$res);
-
-    if(!@files && !$config->{overwrite}) {
-        my $cmd = "$fastqdump_bin -O $self->{output_dir} $config->{sra_file}";
-        $self->_run_cmd($cmd);
-        my $res = $self->_run_cmd("find $self->{output_dir} -maxdepth 1 -name '$name*.fastq'");
-        @files = split(/\n/,$res);
-    }
-
-    print STDERR "@files\n";
-
-    my $retval = {
-        'files' => \@files,
-        'path' => $self->{output_dir},
-        'basename' => $name,
-        'paired_end' => 0
-    };
-    if($files[0] =~ /_\d.fastq/) {
-        $retval->{paired_end} = 1;
-    }
-    if($self->{verbose}==1){print STDERR "======== &dumpFastq: Finished ========\n";}
-    return $retval;
 }
 
 =head2 runBWA
@@ -1592,7 +1592,7 @@ sub mpileup {
     if($self->{verbose}==1){print STDERR "======== &mpileup: Finished ========\n";}
     return $output;
 }
-=head2 prelim_filter	## NEED TO FIX: Change to filter out M_M, then resort and split.
+=head2 prelim_filter	
 
  Title   : prelim_filter
  Usage   : my $potential_LGT_bam = $lgtseek->prelim_filter({input => <bam>})
@@ -1610,7 +1610,7 @@ sub mpileup {
 =cut
 sub prelim_filter {
 
-    ## General code scheme: (1) Filter out desired reads from the input. (2) Resort based on names. (3) Then finally split into chunks.
+    ## General code scheme: (1) Resort based on names. (2) Filter out M_M reads. (3) Then finally split into chunks.
     my ($self,$config)=@_;
     my $input = $config->{input_bam} ? $config->{input_bam} : $self->{input_bam};
     if($self->empty_chk({input => $input})==1){print STDERR "Warning: &prelim_filter input: $input is empty.\n"};
@@ -1626,6 +1626,7 @@ sub prelim_filter {
     if($self->{verbose}==1){print STDERR "======== &prelim_filter: Start ========\n";}
     my ($fn,$path,$suffix)=fileparse($input,('.srt.bam','.bam'));
     my $header = $self->_run_cmd("samtools view -H $input");
+    my @output_list;	## Array of output bams to return
     ## Check if the output exists already
     ## $output isn't set right at this point in the scrip to check if the final output already exist. FIX later.
     my $files_exist = 0; 
@@ -1635,97 +1636,105 @@ sub prelim_filter {
     	chomp(my @output_list = `find $output_dir -name '$fn\*_prelim.bam'`);
     	return \@output_list;
     }
-
-
-    ## (1). Prelim filter.
-    ## Check to see if prelim output exists already
-    my $step2_bam = "$output_dir$fn\_filtered.bam";
-    if (-e "$step2_bam") {$files_exist=1;}
+    ## Check we dont' have the name-sorted.bam already
+    my $sorted_bam = "$output_dir$fn\_name-sorted.bam";
+    if (-e "$sorted_bam") {$files_exist=1;}
     if ($files_exist==1 && $overwrite==0){
-    	print STDERR "Already found &prelim_filter output, skipping to sort and split: $step2_bam.\n";
-    	$prelim_filter=0;
+        print STDERR "Already found &prelim_filter \$sorted_bam, starting to filter: $sorted_bam.\n";
+        $prelim_filter=0;
+    }    
+    ## (1). Sort the bam by name instead of position
+    if($name_sort_input==1){
+    	if($self->{verbose}==1){print STDERR "======== &prelim_filter Sort ========\n";}
+        my $cmd = "samtools sort -n -@ $self->{threads} -m $self->{sort_mem} $input $output_dir$fn\_name-sorted";
+        if($self->{verbose}==1){print STDERR "======== &prelim_filter Sort: $cmd ===\n";}
+        $self->_run_cmd("$cmd");
+    } else {
+        $sorted_bam = $input;
     }
-	## Prelim filter Analysis.
+    ## (2). Prelim filtering.
+    my $more_lines = 1;
+    my $num_pass = 0;
+    my $num_null = 0;
+    my $num_singletons = 0;
     if($prelim_filter==1){
-    	if($self->{verbose}==1){print STDERR "======== &prelim_filter: Filter ========\n";}
-	    my $output;
-	    my %ids_to_print;
-	    open(my $in, "-|","samtools view $input") || die "Can't open &prelim_filter input: $input because: $!\n";
-	    open(my $out, "| samtools view -S - -bo $step2_bam") || die "Can't open &prelim_filter output: $step2_bam because: $!\n";
-	    print $out "$header";
-	    while(<$in>){
-	        my ($id,$flag,$cigar,$sequence) = (split /\t/, $_)[0,1,5,9];
-	        next if ($id=~/null/ && $sequence=~/\*/);
-	        my $converted_flag = $self->_parseFlag($flag);
-	        if($converted_flag->{'qunmapped'} || $converted_flag->{'munmapped'}){print $out "$_";}          ## If either read is unmapped print it
-	        if($keep_softclip==1){ 																			## If the read is soft clipt >=24 bp, print it
-	            if($ids_to_print{$id}){
-	                print $out "$_";
-	                $ids_to_print{$id} = undef;
-	            }
-	            if($cigar =~ /(\d+)M(\d+)S/ && $2 >= 24){print $out "$_"; $ids_to_print{$id}++;}
-	            if($cigar =~ /(\d+)S(\d+)M/ && $1 >= 24){print $out "$_"; $ids_to_print{$id}++;}
+	    if($self->{verbose}==1){print STDERR "======== &prelim_filter: Filter ========\n";}
+	    ## Setup and open output
+	    my $i = 0;  		## Used to count number of lines per bam as being processed
+	    my $count = 0;		## Used to count number of split output bams
+		my $output = "$output_dir/$fn\_$count\_prelim.bam";
+		open(my $out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
+		print $out "$header";
+		push(@output_list, $output);
+
+		## Open input bam
+	    open(my $infh,"samtools view $sorted_bam |") || die "&prelim_filter can't open the \$sorted_bam: $sorted_bam because: $1\n";
+	    ## (2). Actual Prelim Filtering starting:
+	    ##      Read through and filter bam reads, splitting output as we go
+	    
+	    while($more_lines==1){
+	    	my $read1=<$infh>;
+	    	my $read2=<$infh>;
+	    	my $print = 0;
+	    	## Stop if we have empty lines
+	    	if(!$read1 || !$read2){$more_lines=0; last;}
+	    	## (3). Split output: close the current output and open a new output
+	    	if($i >= $seqs_per_file && $split_bam==1){
+	    			if($self->{verbose}==1){print STDERR "======== &prelim_filter: Sort ========\n";}
+	                close $out or die "Unable to close &prelim_filter output: $output\n";
+	                $count += 1;
+	                $output = "$output_dir/$fn\_$count\_prelim.bam";
+	                open($out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
+	                push(@output_list, $output);
+	                print $out "$header"; 
+	                $i=0;
+	        } 
+	    	## Split needed fields 
+	    	my ($id1,$flag1,$cigar1,$sequence1) = (split /\t/, $read1)[0,1,5,9];
+	    	my ($id2,$flag2,$cigar2,$sequence2) = (split /\t/, $read2)[0,1,5,9];
+	    	## Check sequence id's. ## Both id's must be the same && no "null" reads
+            while($id2=~/null/){
+                $num_null++;
+                $read2 = <$infh>;
+                ($id2,$flag2,$cigar2,$sequence2) = (split /\t/, $read2)[0,1,5,9];
+            }
+            ## Both id's must be the same.
+	    	while($id1=~/null/ || $id1 ne $id2){                                                              ## If id1 isn't the same as id2, skip id1. Keep the pair moving down the bam until both are the same.
+                if($id1=~/null/){$num_null++;}else{$num_singletons++;}
+                $read1 = $read2;
+                $read2 = <$infh>;
+                ($id1,$flag1,$cigar1,$sequence1) = (split /\t/, $read1)[0,1,5,9];
+                ($id2,$flag2,$cigar2,$sequence2) = (split /\t/, $read2)[0,1,5,9];
+            }
+            #next if ($id1=~/null/ || $id2=~/null/);
+	    	## Convert sam flag into usable data
+	    	my $converted_flag1 = $self->_parseFlag($flag1);
+	    	my $converted_flag2 = $self->_parseFlag($flag2);
+	        ## FILTER for reads that are UM (M_UM,UM_M,UM_UM)
+	        if($converted_flag1->{'qunmapped'} || $converted_flag1->{'munmapped'}){$print = 1;}
+	        ## FILTER for soft clipped reads
+	        if($keep_softclip==1){
+	        	map {
+	        		if($_ =~ /(\d+)M(\d+)S/ && $2 >= 24){$print = 1;}
+	            	if($_ =~ /(\d+)S(\d+)M/ && $1 >= 24){$print = 1;}
+	            }($cigar1,$cigar2);
 	        }
-	        if($self->{paired_end}==0){$ids_to_print{$id} = undef;}											## Don't remember id's to print if single_end reads.
+	        if($print==1){
+                print $out "$read1$read2";
+	           $i += 2;
+               $num_pass++; 
+           }
 	    }
-	    close $in || die "Can't close &prelim_filter input: $input because: $!\n";
-	    close $out || die "Can't close &prelim_filter output: $step2_bam because: $!\n";
-	    print STDERR 
+	    close $out or die "Can't close out: $out because: $!\n";
+	    $self->_run_cmd("rm $sorted_bam");
+	} else {
+        push(@output_list, $sorted_bam); 
 	}
     
-    my @output_list;
-    
-    ## (2 & 3) Split bam.
-    if($split_bam==1){
-        ## (2) Resort by name.
-        my $infh; 
-    	if($name_sort_input==1 && $self->{paired_end}==1){
-    		open($infh,"samtools sort -@ $self->{threads} -m $self->{sort_mem} -no $step2_bam - | samtools view - |") || die "Can't open: $step2_bam because: $!\n";
-    		if($self->{verbose}==1){print STDERR "======== &prelim_filter: Sort ========\n";}
-    	} else {
-    		open($infh,"-|","samtools view $step2_bam") || die "Can't open: $step2_bam because: $!\n";
-    	}
-        my $i = 0;
-        my $count = 0;
-        my $output = "$output_dir/$fn\_$count\_prelim.bam";
-        #open(my $in, "-|","samtools view $step2_bam") || die "Can't open: $input because: $!\n";
-        open(my $out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
-        if($self->{verbose}==1){print STDERR "======== &prelim_filter: Split ========\n";}
-        print $out "$header";
-        push(@output_list, $output);
-        my $more_lines = 1;
-        while($more_lines==1) {
-            my $line1 = <$infh>;
-            my $line2 = <$infh>;
-            ## Stop if we have empty lines
-            if(!$line1 || !$line2){
-                $more_lines = 0;
-                last;
-            }
-            if($i >= $seqs_per_file){
-                close $out or die "Unable to close &prelim_filter output: $output\n";
-                $count += 1;
-                $output = "$output_dir/$fn\_$count\_prelim.bam";
-                open($out, "| samtools view -S - -bo $output") || die "Can't open: $output because: $!\n";
-                push(@output_list, $output);
-                print $out "$header"; 
-                $i=0;
-            } 
-            print $out "$line1$line2";
-            $i += 2;   
-        }
-        close $out or die "Can't close out: $out because: $!\n";
-        $self->_run_cmd("rm $step2_bam");
-    } else {																									## If we didn't split the output
-    	if($name_sort_input==1){																			
-    		$self->_run_cmd("samtools sort -n -m $self->{sort_mem} $step2_bam $output_dir/$fn\_prelim");		## (2) Resort by name
-    		push(@output_list, "$output_dir/$fn\_prelim.bam");
-    		$self->_run_cmd("rm $step2_bam");
-    	} else {
-    		push(@output_list, $step2_bam);																		## Return filtered bam if we dont' split and name sort
-    	}									
-    }
     my @sort_out_list = sort @output_list;
+    if($self->{verbose}==1){print STDERR "======== &prelim_filter: Singletons:$num_singletons ==\n";}
+    if($self->{verbose}==1){print STDERR "======== &prelim_filter: Null:$num_null ==\n";}
+    if($self->{verbose}==1){print STDERR "======== &prelim_filter: Pass:$num_pass ==\n";}
     if($self->{verbose}==1){print STDERR "======== &prelim_filter: Finished ========\n";}
     return \@sort_out_list;
 }
@@ -1820,9 +1829,11 @@ sub empty_chk {
     my $file = $config->{input};
     my $empty = 0; ## 0 = False, 1=True, file is empty.
     my $count; 
-    if($file=~/\.bam$/){$count = $self->_run_cmd("samtools view $file | head | wc -l");} 
-    elsif($file=~/\.sam$/){$count = $self->_run_cmd("samtools view -S $file | head | wc -l");} 
-    else {$count = $self->_run_cmd("head $file | wc -l");}
+    if($file=~/\.bam$/){
+    	$count = $self->_run_cmd("samtools view $file | head | wc -l");
+    } else {
+    	$count = $self->_run_cmd("head $file | wc -l");
+    }
     if($count == 0){$empty=1;}
     return $empty;   
 }
@@ -1855,19 +1866,19 @@ sub new2 {
     if(!$config->{diag} && !$config->{clovr} && !$config->{fs}){
         $system{fs}=1;
     }
+    ## IDEA: Make a config file with all the defaults. This would allow different users to have diff. defaults. 
     ## Global Defaults
     my $global_defaults = 
     {
     	verbose => 1,
-    	sort_mem => "3000000000",											## Titrated out, takes ~4.5 G mem to run 2500000000. Fairly linear
-    	sub_mem => "6G",
+    	sort_mem => "5G",											
     	output_list => 1,
         overwrite => 0,
         decrypt => 0,
         Qsub => 0,
         project => "jdhotopp-lab",
         name_sort_input => 1,
-        seqs_per_file => "50000000",
+        seqs_per_file => "50000000",					## 50 Million
         prelim_filter => 0,
         split_bam => 1,
         keep_softclip => 1,
@@ -1946,3 +1957,5 @@ sub new2 {
 }
 
 1;
+
+

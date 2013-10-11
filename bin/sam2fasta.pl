@@ -208,7 +208,9 @@ sub process_file2 {
     while(<$infh>) {
         my @fields = split;
 
-
+        # Skip bad reads
+        next if($fields[0]=~/null/);
+        
         # Don't do anything if we've already seen this read and have gotten both mates.
         if(!$paired || !$reads_seen->{$fields[0]}) {
 
