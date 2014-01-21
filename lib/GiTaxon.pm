@@ -42,10 +42,10 @@ sub new {
     if($self->{'type'} eq 'protein') {
         $gi_tax_file = 'gi_taxid_prot.dmp';
     }
-    print STDERR "Here with $args->{'taxon_dir'}\n";
+    # print STDERR "Here with $args->{'taxon_dir'}\n";
     # This option can be used if the user want's to override all the nodes/names params at once
     if($args->{'taxon_dir'}) {
-        print STDERR "Here with a taxon directory $args->{'taxon_dir'}\n";
+        # print STDERR "Here with a taxon directory $args->{'taxon_dir'}\n";
         # Find the nodes, names and nucleotide mapping file
         find(sub {
             if($File::Find::name =~  /nodes.dmp/) {
@@ -80,10 +80,18 @@ sub new {
         $self->{'gi2tax'} = $args->{'gi2tax'};
     }
     $self->{'db'} = Bio::DB::Taxonomy->new(-source => 'flatfile',
-                                 -nodesfile => $self->{'nodes'},
-                                 -namesfile => $self->{'names'},
-                                 -directory => $self->{'taxonomy_dir'});
-    print STDERR "Using $self->{nodes} and $self->{names} and $self->{'taxonomy_dir'} $self->{'gi_coll'} $self->{'db_host'} $self->{'gi2tax'}\n";
+    	-nodesfile => $self->{'nodes'},
+    	-namesfile => $self->{'names'},
+    	-directory => $self->{'taxonomy_dir'}
+    );
+    if($args->{verbose}){
+    	print STDERR "======== &Gi2Taxon - Using $self->{nodes}\n";
+    	print STDERR "======== &Gi2Taxon - Using $self->{names}\n";
+    	print STDERR "======== &Gi2Taxon - Using $self->{'taxonomy_dir'}\n";
+    	print STDERR "======== &Gi2Taxon - Using $self->{'gi_coll'}\n";
+    	print STDERR "======== &Gi2Taxon - Using $self->{'db_host'}\n";
+    	print STDERR "======== &Gi2Taxon - Using $self->{'gi2tax'}\n";
+	}	
     bless $self;
     $self->{'gi2taxon'} = $self->getgi2taxon($self->{'gi2tax'});
 

@@ -34,6 +34,7 @@ my $trace_lookup = {};
 my $filter_hits = [];
 my $lineages = [];
 my $gi2tax;
+my $overallfile;
 my $out1file;
 my $out2file;
 my $out3;
@@ -41,12 +42,18 @@ my $trace_mapping_file;
 my $FILTER_MIN_OVERLAP;
 my $filter_lineage;
 
-=head2 filterBlast
+=head2 &filterBlast
 
  Title   : filterBlast
  Usage   : my $bestBlast = LGTBestBlast::filterBlast({fasta => $fasta,...})
  Function: Returns the path to filtered blast reports
- Returns : paths to filtered blast reports
+ Returns :  Hash ref. of filtered blast hits. 
+
+     		list_file     => list of the files below (overall,out1,out2)
+        	overall_blast => Lin1 & Lin2 hits,
+        	out1file_file => lineage1 hits,
+        	out2file_file => lineage2 hits,
+
  Args    : A hash containing potentially several config options:
 
            fasta - Path to a fasta file to search
@@ -76,51 +83,51 @@ sub filterBlast {
         $input = $args->{blast};
     }
 
-    if(!$input) {
-        die "Need to provide a fasta or a blast file for blast\n";
-    }
+    if(!$input) {die "Need to provide a fasta or a blast file for blast\n";}
 
+    # Initialize gi2taxon db. 
     $gi2tax = $args->{gitaxon};
-
-    if(!$gi2tax) {
-        die "Need to provide a gitaxon object\n";
-    }
+    if(!$gi2tax) {die "Need to provide a gitaxon object\n";}
 
 
     # Get the basename of the input file.
     my ($name,$directories,$suffix) = fileparse($input,qr/\.[^.]*/);
 
     # Open the overall file
-    my $overallfile = $args->{overalloutput};
+    $overallfile = $args->{overalloutput};
     if(!$args->{overalloutput} && $args->{output_dir}) {
         $overallfile = $args->{output_dir}."/$name\_overall.out";
-        print STDERR "Printing to $overallfile\n";
+        # print STDERR "Printing to $overallfile\n";
     }    
     open $out3, ">$overallfile" or die "Unable to open overall output $overallfile\n";
 
     my $trace_mapping_file = $args->{trace_mapping};
+    
     &_read_map_file($args->{trace_mapping});
-
-
-    
     &_init_lineages($args,$name);
-    
-#    $args->{blast_bin} = $args->{blast_bin} ? $args->{blast_bin} : 'megablast -e 1 -N 1 -T F';
-#    $args->{blast_bin} = $args->{blast_bin} ? $args->{blast_bin} : 'megablast -e 10e-5 -t 16 -N 1 -W 12 -T F';
 
+#   $args->{blast_bin} = $args->{blast_bin} ? $args->{blast_bin} : 'megablast -e 1 -N 1 -T F';
+#   $args->{blast_bin} = $args->{blast_bin} ? $args->{blast_bin} : 'megablast -e 10e-5 -t 16 -N 1 -W 12 -T F';
     $args->{blast_bin} = $args->{blast_bin} ? $args->{blast_bin} : 'blastall -p blastn -e 1 -T F';
     my $fh;
     if($args->{blast}) {
+        print STDERR "Opening blast input.\n";
         open($fh, "<$input") or die "Unable to open $input\n";
     }
     elsif(!$args->{blast}) {
         open($fh, "-|", "$args->{blast_bin} -d $args->{db} -m8 -i $input") 
-            or die "Unable to run $args->{blast_bin} on $input with db $args->{db}\n";
+            or die "Unable to run: $args->{blast_bin} on: $input with db: $args->{db}\n";
     }
 
     &_process_file($fh);
+    my $list = &_create_list_of_outputs($args);
+
+	foreach my $lineage (@$lineages){
+		close $lineage->{handle} or die "=== &LGTBestBlast - Can't close output filehandle because: $! ===\n";
+	}
 
     return {
+    	list_file     => $list,
         overall_blast => $overallfile,
         out1file_file => $out1file,
         out2file_file => $out2file
@@ -153,7 +160,7 @@ sub _read_map_file {
         print STDERR "Done reading the map file\n";
     }
     else {
-        print STDERR "No map file, will try and assume mates.\n";
+        # print STDERR "No map file, will try and assume mates.\n";
         
     }
 }
@@ -161,46 +168,47 @@ sub _read_map_file {
 sub _init_lineages {
     my $args = shift;
     my $name = shift;
-if($args->{lineage1} && $args->{lineage2}) {
+	if($args->{lineage1} && $args->{lineage2}) {
+		$out1file = $args->{output1};
+    	if(!$args->{output1} && $args->{output_dir}) {
+        	$out1file = $args->{output_dir}."/$name\_lineage1.out";
+    	}
+    	open my $out1, ">$out1file" or die "Unable to open lineage1 output $out1file\n";
 
-    $out1file = $args->{output1};
-    if(!$args->{output1} && $args->{output_dir}) {
-        $out1file = $args->{output_dir}."/$name\_lineage1.out";
-    }
-    open my $out1, ">$out1file" or die "Unable to open lineage1 output $out1file\n";
+    	$out2file = $args->{output2};
+    	if(!$args->{output1} && $args->{output_dir}) {
+        	$out2file = $args->{output_dir}."/$name\_lineage2.out";
+    	}
+    	open my $out2, ">$out2file" or die "Unable to open lineage2 output $out2file\n";
 
-    $out2file = $args->{output2};
-    if(!$args->{output1} && $args->{output_dir}) {
-        $out2file = $args->{output_dir}."/$name\_lineage2.out";
-    }
-    open my $out2, ">$out2file" or die "Unable to open lineage2 output $out2file\n";
-
-    push(@$lineages,({
-        'lineage' => $args->{lineage1},
-        'tophit' => 1,#$args->{lineage1tophit},
-        'best_e' => 100,
-        'id' => '',
-        'handle' => $out1,
-        'best_rows' => [],
-        'name' => 'lineage1'
-       },
-       {'lineage' => $args->{lineage2},
-        'tophit' => 1,#$args->{lineage2tophit},
-        'best_e' => 100,
-        'id' => '',
-        'handle' => $out2,
-        'best_rows' => [],
-        'name' => 'lineage2'
-       }));
-}
-push(@$lineages,{'lineage' => '',
-     'tophit' => 1,
-     'best_e' => 100,
-     'id' => '',
-     'handle' => $out3,
-     'best_rows' => [],
-     'name' => 'overall'
-     });
+    	push(@$lineages,(
+    		{'lineage' => $args->{lineage1},
+				'tophit' => 1,#$args->{lineage1tophit},
+				'best_e' => 100,
+				'id' => '',
+				'handle' => $out1,
+				'best_rows' => [],
+				'name' => 'lineage1'
+			},
+			{'lineage' => $args->{lineage2},
+			'tophit' => 1,#$args->{lineage2tophit},
+			'best_e' => 100,
+        	'id' => '',
+        	'handle' => $out2,
+        	'best_rows' => [],
+        	'name' => 'lineage2'
+       		}
+       	));
+	}
+	push(@$lineages,{'lineage' => 'cellular organisms', ## KBS 01.05.13
+    #push(@$lineages,{'lineage' => '', 					## KBS 01.05.13
+		'tophit' => 1,
+    	'best_e' => 100,
+		'id' => '',
+		'handle' => $out3,
+		'best_rows' => [],
+		'name' => 'overall'
+    });
 }
 
 sub _process_file {
@@ -209,10 +217,9 @@ sub _process_file {
     while(<$fh>) {
         chomp;
         my @new_fields = split(/\t/, $_);
-
         my $tax;
-
         my $found_tax = 0;
+
         # If we already have lineage info in here we'll not append it again
         if($new_fields[14]) {
             $found_tax = 1;
@@ -224,8 +231,6 @@ sub _process_file {
         else {
             $tax = $gi2tax->getTaxon($new_fields[1]);
         }
-
-   
 
         if($tax->{'taxon_id'}) {
             if(!$found_tax) {
@@ -320,18 +325,17 @@ sub _append_hits {
 
 sub _process_line {
     my ($fields,$tax,$lineage) = @_;
- 
-#    print STDERR "Looking for $lineage in $fields->[16]\n";
+    
     my $finished_id = 0;
     # See if we are on the last id still
-    if($lineage->{id} eq $fields->[0]) {
+    if ($lineage->{id} eq $fields->[0]) {
         if($lineage->{tophit}) {
             # If this is one of the best
             if($fields->[10] == $lineage->{best_e}) {
                 # Check that we are one of the lineage
                 if($tax->{lineage} =~ /$lineage->{lineage}/) {
                     push(@{$lineage->{best_rows}}, $fields);
-                    print "Here with $lineage->{lineage}\n";
+                    # print STDERR "Here with: $lineage->{lineage\n";
                 }
             }
             # If we find a lower e-value
@@ -347,9 +351,7 @@ sub _process_line {
         else {
             # Not doing it for now.
         }
-    }
-    # If we are no longer on the last id
-    else {
+    } else { # If we are no longer on the last id
         if($lineage->{tophit}) {
             # We have finished a hit
             &_print_hits($lineage);
@@ -467,6 +469,28 @@ sub _get_overlap_length {
     my $len = ($qlen + $slen) - ($max - $min);
 
     return $len;
+}
+
+sub _create_list_of_outputs {
+   	my $config = shift;
+   	my $out_dir;
+   	my ($name,$directories,$suffix);
+   	if($config->{fasta}){
+   		($name,$directories,$suffix) = fileparse($config->{fasta},qr/\.[^.]*/); 
+   		$out_dir = defined $config->{output_dir} ? $config->{output_dir} : $directories;
+   	} elsif ($config->{blast}){
+   		($name,$directories,$suffix) = fileparse($config->{blast},qr/\.[^.]*/); 
+   		$out_dir = defined $config->{output_dir} ? $config->{output_dir} : $directories;
+   	} else {
+   		if(!$config->{output_dir}){die "Must pass &BestBlast2 an output_dir. $!\n";}
+   		$out_dir = $config->{output_dir};
+   	}
+   	open OUT, ">$out_dir/$name\_filtered_blast.list" or die "Unable to open $out_dir/$name\_filtered_blast.list\n";
+   	print OUT "$overallfile\n";
+   	print OUT "$out1file\n";
+   	print OUT "$out2file\n";
+   	close OUT;
+   	return "$out_dir/$name\_filtered_blast.list";
 }
 
 1;

@@ -160,7 +160,7 @@ sub writeOutput {
         } else {
             $out2=">-";
         }
-        print STDERR "independant output: $out2\nMerged output: $outf";
+        print STDERR "independant output: $out2\nMerged output: $outf\n";
         open(OUT2,">","$out2") or die "Couldn't open $out2\n";
 #    }
 
@@ -182,6 +182,7 @@ sub writeOutput {
 #            print STDERR "\tSingleEnd_lca ...";
             my $new_conservative_se_lca = &find_lca([$self->{reads_by_read_id}->{"$key\_1"},$self->{reads_by_read_id}->{"$key\_2"}]);
             if($self->{reads_by_read_id}->{"$key\_1"} =~ $self->{reads_by_read_id}->{"$key\_2"} || $self->{reads_by_read_id}->{"$key\_2"} =~ $self->{reads_by_read_id}->{"$key\_1"}){
+                ## Liberal
                 if(length($self->{reads_by_read_id}->{"$key\_1"}) >= length($self->{reads_by_read_id}->{"$key\_2"})){
                     print $out join("\t",($key, $self->{reads_by_mate_id}->{$key}, $new_conservative_se_lca,$self->{reads_by_read_id}->{"$key\_1"}));
                     print $out "\n";

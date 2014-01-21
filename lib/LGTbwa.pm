@@ -49,9 +49,6 @@ package LGTbwa;
 use strict;
 use Pod::Usage;
 use File::Basename;
-
-
-
 my %options = ();
 my $ref_files = [];
 my $PAIRED = 0;
@@ -83,9 +80,9 @@ sub runBWA {
     }
     # Check if the data are paired or not
     # HUGE HACK - need to remove .lite if it exists
-    $options{input_base} =~ s/\.lite//;
+    #$options{input_base} =~ s/\.lite//;
 
-    $PAIRED=1 if(-e "$options{input_dir}/$options{input_base}_1.fastq" || $options{input_bam});
+    $PAIRED=1 if(-e "$options{input_dir}/$options{input_base}_1.fastq" || -e "$options{input_dir}/$options{input_base}_1.fastq.gz" || $options{input_bam}) ;
 
     if($options{use_bwasw}) {
         die "bwasw is not implemented yet\n";
@@ -122,6 +119,7 @@ sub run_bwa {
             my $out1;
             my $out2;
             
+            open(my $bwa_log, ">>$options{output_dir}/\.bwa_stderr.log") || die "&run_bwa can't open: $options{output_dir}/\.bwa_stderr.log";
             my $output_file = "$options{output_dir}/$refname\_$options{input_base}.sam";
             if($options{output_bam}) {
                 $output_file = "$options{output_dir}/$refname\_$options{input_base}.bam";
@@ -138,33 +136,44 @@ sub run_bwa {
                 $options{input_base} = $name;
                 # Run the first one through aln
                 $out1 = "$options{output_dir}/$refname\_$name\_aln_sa1.sai";
-                my $cmd = "$options{bwa_path} aln -b -1 $options_string $ref $options{input_bam} > $out1";
-                print STDERR "\nCMD: $cmd\n"; 
+                my $cmd = "$options{bwa_path} aln -b -1 $options_string $ref $options{input_bam} > $out1 2>>$options{output_dir}/\.bwa_stderr.log";
+                print STDERR "CMD: $cmd\n"; 
+                print $bwa_log "CMD: $cmd\n"; 
                 system($cmd) == 0 or die "Unable to run $cmd\n";
 
                 # Run the second one through aln
                 $out2 = "$options{output_dir}/$refname\_$name\_aln_sa2.sai";
-                my $cmd = "$options{bwa_path} aln -b -2 $options_string $ref $options{input_bam} > $out2";
-                print STDERR "\nCMD: $cmd\n";
+                $cmd = "$options{bwa_path} aln -b -2 $options_string $ref $options{input_bam} > $out2 2>>$options{output_dir}/\.bwa_stderr.log";
+                print STDERR "CMD: $cmd\n";
+                print $bwa_log "CMD: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
             else {
-
-                $in1 = "$options{input_dir}/$options{input_base}_1.fastq";
-                $out1 = "$options{output_dir}/$refname\_$options{input_base}_aln_sa1.sai";
-                $in2 = "$options{input_dir}/$options{input_base}_2.fastq";
+                ## Make sure we have the input fastq (no-zip)
+                if(-e "$options{input_dir}/$options{input_base}_1.fastq"){
+                    $in1 = "$options{input_dir}/$options{input_base}_1.fastq";						
+                    $in2 = "$options{input_dir}/$options{input_base}_2.fastq";
+                } 
+                ## Check if we have .fastq.gz inputs
+                elsif (-e "$options{input_dir}/$options{input_base}_1.fastq.gz"){
+                    $in1 = "$options{input_dir}/$options{input_base}_1.fastq.gz";                      
+                    $in2 = "$options{input_dir}/$options{input_base}_2.fastq.gz";
+                }
+                $out1 = "$options{output_dir}/$refname\_$options{input_base}_aln_sa1.sai";						                
                 $out2 = "$options{output_dir}/$refname\_$options{input_base}_aln_sa2.sai";
             
                 # Run the first one through aln
                 if($options{overwrite} || ! -e $out1) {
-                    my $cmd = "$options{bwa_path} aln $options_string $ref $in1 > $out1";
-                    print STDERR "\nCMD: $cmd\n";
+                    my $cmd = "$options{bwa_path} aln $options_string $ref $in1 > $out1 2>>$options{output_dir}/\.bwa_stderr.log";
+                    print STDERR "CMD: $cmd\n";
+                    print $bwa_log "CMD: $cmd\n";
                     system($cmd) == 0 or die "Unable to run $cmd\n";
                 }
                 if($options{overwrite} || ! -e $out2) {
                     # Run the second one through aln
-                    my $cmd = "$options{bwa_path} aln $options_string $ref $in2 > $out2";
-                    print STDERR "\nCMD: $cmd\n";
+                    my $cmd = "$options{bwa_path} aln $options_string $ref $in2 > $out2 2>>$options{output_dir}/\.bwa_stderr.log";
+                    print STDERR "CMD: $cmd\n";
+                    print $bwa_log "CMD: $cmd\n";
                     system($cmd) == 0 or die "Unable to run $cmd\n";
                 }
             }
@@ -172,28 +181,31 @@ sub run_bwa {
             my $cmd;
             # Run sampe
             if($options{run_lca}) {
-                my $cmd = "$options{bwa_path} sampe -n $options{num_aligns} $ref \"$out1\" \"$out2\" \"$in1\" \"$in2\" | $options{samtools_path}samtools view $options{samtools_flag} -S -";
+                my $cmd = "$options{bwa_path} sampe -n $options{num_aligns} $ref \"$out1\" \"$out2\" \"$in1\" \"$in2\" 2>>$options{output_dir}/\.bwa_stderr.log | $options{samtools_path}samtools view $options{samtools_flag} -S -";
                 open(my $handle, "-|", $cmd);
                 $sam2lca->process_file({handle => $handle});
             }
             elsif($options{output_bam}) {
                 if($options{overwrite} || ! -e "$options{output_dir}/$refname\_$options{input_base}.bam") {
-                    my $cmd = "$options{bwa_path} sampe -n $options{num_aligns} $ref \"$out1\" \"$out2\" \"$in1\" \"$in2\" | $options{samtools_path}samtools view $options{samtools_flag} -bS - > $options{output_dir}/$refname\_$options{input_base}.bam";
-                    print STDERR "\nCMD: $cmd\n";
+                    my $cmd = "$options{bwa_path} sampe -n $options{num_aligns} $ref \"$out1\" \"$out2\" \"$in1\" \"$in2\" 2>>$options{output_dir}/\.bwa_stderr.log | $options{samtools_path}samtools view $options{samtools_flag} -bS - > $options{output_dir}/$refname\_$options{input_base}.bam";
+                    print STDERR "CMD: $cmd\n";
+                    print $bwa_log "CMD: $cmd\n";
                     system($cmd) == 0 or die "Unable to run $cmd\n";
                 }
             }
             else {
                 if($options{overwrite} || ! -e "$options{output_dir}/$refname\_$options{input_base}.sam") {
-                    my $cmd = "$options{bwa_path} sampe -n $options{num_aligns} $ref \"$out1\" \"$out2\" \"$in1\" \"$in2\" > $options{output_dir}/$refname\_$options{input_base}.sam";
-                    print STDERR "\nCMD: $cmd\n";
+                    my $cmd = "$options{bwa_path} sampe -n $options{num_aligns} $ref \"$out1\" \"$out2\" \"$in1\" \"$in2\" > $options{output_dir}/$refname\_$options{input_base}.sam 2>>$options{output_dir}/\.bwa_stderr.log";
+                    print STDERR "CMD: $cmd\n";
+                    print $bwa_log "CMD: $cmd\n";
                     system($cmd) == 0 or die "Unable to run $cmd\n";
                 }
             }
 
             if($options{cleanup_sai}) {
                 my $cmd = "rm -f $out1 $out2";
-                print STDERR "\nCMD: $cmd\n";
+                print STDERR "CMD: $cmd\n";
+                print $bwa_log "CMD: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
         }
@@ -208,17 +220,17 @@ sub run_bwa {
             my $out = "$options{output_dir}/$refname\_$options{input_base}_aln_sa.sai";
             $cmd = "$options{bwa_path} aln $options_string $ref $in > $out";
             if($options{overwrite} || ! -e "$out") {
-                print STDERR "\nCMD: $cmd\n";
+                print STDERR "CMD: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
             if($options{overwrite} || ! -e "$options{output_dir}/$refname\_$options{input_base}.sam") {
                 $cmd = "$options{bwa_path} samse -n $options{num_aligns} $ref \"$out\" \"$in\" > $options{output_dir}/$refname\_$options{input_base}.sam";
-                print STDERR "\nCMD: $cmd\n";
+                print STDERR "CMD: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
             if($options{cleanup_sai}) {
                 $cmd = "rm -f $out";
-                print STDERR "\nCMD: $cmd\n";
+                print STDERR "CMD: $cmd\n";
                 system($cmd) == 0 or die "Unable to run $cmd\n";
             }
         }

@@ -25,7 +25,8 @@ The rest of the documentation details each of the object methods.
 Internal methods are usually preceded with a _
 
 =cut
-use lib '../lib';
+#use lib '../lib';
+use lib '/local/projects-t3/HLGT/scripts/lgtseek/lib/'; 
 use strict;
 use LGTSeek;
 use File::Basename;
@@ -36,6 +37,7 @@ my $results = GetOptions (\%options,
                           'ref_db=s',
                           'output_dir=s',
                           'bin_dir=s',
+                          'path_to_nt=s',
                           'samtools_bin=s',
                           'output_dir=s',
                           'donor_lineage=s',
@@ -76,7 +78,7 @@ my $lgtseek = LGTSeek->new({
     taxon_idx_dir => $options{taxon_idx_dir}
 });
 
-my($name,$path,$suff) = fileparse($options{bam_file},'.bam');
+my($name,$path,$suff) = fileparse("$options{bam_file}",'.bam');
 # Process the LGT's here
 my $filtered_fasta = $lgtseek->sam2Fasta({
     input => $options{bam_file}});
@@ -87,8 +89,8 @@ my $filtered_fasta = $lgtseek->sam2Fasta({
 my $best_blasts = $lgtseek->bestBlast2(
     {
         db => $options{path_to_nt},
-        lineage1 => $options{donor_lineage},
-        lineage2 => $options{host_lineage},
+        lineage1 => 'Bacteria', 
+        lineage2 => 'Eukaryota', 
         fasta => $filtered_fasta,
         output_dir => "$options{output_dir}"
     });
@@ -103,7 +105,7 @@ my $valid_lgts = $lgtseek->runLgtFinder(
     });
 
 # Also run the blast again with raw output.
-`blastall -p blastn -e 10e-5 -T F -d $options{path_to_nt} -i $filtered_fasta > $options{output_dir}/$name\_blast.raw`;
+# `blastall -p blastn -e 10e-5 -T F -d $options{path_to_nt} -i $filtered_fasta > $options{output_dir}/$name\_blast.raw`;
 
 
 
