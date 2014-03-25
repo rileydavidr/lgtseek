@@ -729,8 +729,8 @@ sub runBWA {
  Returns : An object with counts of the different classes as well as the path to bam files 
            containing these reads.
            $object->{files}->{           }
-         					  'lgt_donor'   => "$self->{output_dir}/".$prefix."lgt_donor.bam",
-       						  'lgt_host'    => "$self->{output_dir}/".$prefix."lgt_host.bam",
+         					'lgt_donor'   => "$self->{output_dir}/".$prefix."lgt_donor.bam",
+       						'lgt_host'    => "$self->{output_dir}/".$prefix."lgt_host.bam",
         					'integration_site_donor_donor' => "$self->{output_dir}/".$prefix."integration_site_donor_donor.bam",
         					'integration_site_donor_host' => "$self->{output_dir}/".$prefix."integration_site_donor_host.bam",
         					'microbiome_donor' => "$self->{output_dir}/".$prefix."microbiome.bam",
@@ -1129,68 +1129,136 @@ sub _bwaPostProcessDonorHostPaired {
     };
 }
 
+=head2 blast2lca
+
+ Title   : blast2lca
+ Usage   : my $lca_file = $lgtseek->blast2lca({'blast' => 'path_to_blast-m8.txt','output_dir' => 'path_to_out_dir'})
+ Function: Take a blast -m8 report and calculate the LCA'
+ Returns : A object with the path to the output file(s) with LCA's.         					
+			$lca_file->{independent} = Path to the file with the LCA's for each unique ID. 
+			$lca_file->{PE_lca}		 = Path to the file with the conservative and liberal LCA for combining mate information
+ Args    : 
+	 		blast 				=> 
+	 		output_dir 			=>
+	 		evalue_cutoff 		=>  ###  [1] Max evalue allowed for a hit. Example : 1e-5.
+	 		best_hits_only		=> <0|1> [0] 1= Parse the Blast file for only best hits.
+	 		combine_PE_lca 		=> <0|1> [0] 1= Merge the PE reads with the conservative and liberal methods. ## NOT IMPLEMENTED YET ##
+
+=cut
+
 sub blast2lca {
     my ($self,$config) = @_;
 
     my $gi2tax = $self->getGiTaxon({});
     if($self->{verbose}){print STDERR "======== &blast2lca: Start ========\n";}
-    open IN, "<$config->{blast}" or die "Unable to open $config->{blast}\n";
+    open IN, "<$config->{blast}" or confess "Unable to open $config->{blast}\n";
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->_run_cmd("mkdir -p $output_dir");
     
     my ($name,$directories,$suffix) = fileparse($config->{blast},qr/\.[^.]*/);
-    open OUT, ">$output_dir/$name\_lca.out" or die "Unable to open $output_dir/$name\_lca.out";
-    print OUT join("\t", ('read_id','best_evalue','lca','paired_lca','liberal_lca'));
+    $name = $config->{output_prefix} ? $config->{output_prefix} : $name;
+    open OUT, ">$output_dir/$name\_lca-independent.out" or confess "Error: &blast2lca unable to open $output_dir/$name\_lca-independent.out";
+    if($config->{best_hits_only}==1){
+    	print OUT join("\t", ('read_id','lca','best_evalue'));
+    } else {
+    	print OUT join("\t", ('read_id','lca','best_evalue','highest_evalue'));
+    } ## KBS
     print OUT "\n";
     my $hits_by_readname = {};
     my $id;
-    my $evalue;
+    my $evalue_cutoff = 1; 
+    my $best_evalue;
+    my $worst_evalue;
     my $lca;
 
     my @vals;
     while (<IN>) {
         my @fields = split(/\t/);
         my $new_id = $fields[0];
-        if($fields[0] =~ /^(.*)\/\d/) {
+        if($fields[0] =~ /^(.*)(\/\d)*/) {
             $new_id = $1;
         }
-        if($new_id eq $id && $fields[10] > $evalue) {
-            next;
-        }
-        my $taxon =  $gi2tax->getTaxon($fields[1]);
+      	if($config->{evalue_cutoff}){ $evalue_cutoff=$config->{evalue_cutoff}; }
+        next if($new_id eq $id && $fields[10] > $evalue_cutoff);
+        my $taxon = $gi2tax->getTaxon($fields[1]);
         $taxon->{scientific_name} =~ /^(\w+) /;
         my $genera = $1;
-        if(!defined($id)) {
+        if(!defined($id) && $fields[10] < $evalue_cutoff) {
             $id = $new_id;
-            $evalue = $fields[10];
+            if($config->{best_hits_only}==1){$evalue_cutoff = $fields[10];}							
+            $best_evalue = $fields[10];																
+            $worst_evalue = $fields[10];															
             $lca = $taxon->{lineage};
-            $hits_by_readname->{$fields[0]} = {$taxon->{taxon_id}} => $taxon->{lineage};		## KBS previous  this with errors: $hits_by_readname->{$fields[0]} = {$taxon->{taxon_id}} => $taxon->{lineage};
-        }elsif($new_id eq $id && $fields[10] == $evalue) {
+            $hits_by_readname->{$fields[0]}->{$taxon->{taxon_id}} = $taxon->{lineage};				
+        } elsif ($new_id eq $id && $fields[10] <= $evalue_cutoff) {									
             $hits_by_readname->{$fields[0]}->{$taxon->{taxon_id}} = $taxon->{lineage};
             my $newlca = &_find_lca([$lca, $taxon->{lineage}]);
             $lca = $newlca;
+            if($fields[10]>$worst_evalue){$worst_evalue = $fields[10];}
         }
         elsif($new_id ne $id) {
-
-            @vals = ($id,$evalue,$lca);
-            my $newvals = &_prep_lca_print($hits_by_readname,\@vals);
-            
-
-            print OUT join("\t",@$newvals);
-            print OUT "\n";
+            if($config->{best_hits_only}==1){
+            	print OUT "$id\t$lca\t$best_evalue\n";
+            } else {
+            	print OUT "$id\t$lca\t$best_evalue\t$worst_evalue\n";
+            }
             $id = $new_id;
-            $evalue = $fields[10];
+            if($config->{best_hits_only}==1){$evalue_cutoff = $fields[10];}
+            $best_evalue = $fields[10];																
+            $worst_evalue = $fields[10];															
             $lca = $taxon->{lineage};
         }
     }
     # Print out last line
-
-    @vals = ($id,$evalue,$lca);
-    my $newvals = &_prep_lca_print($hits_by_readname,\@vals);
-    print OUT join("\t",@$newvals);
-    print OUT "\n";
+    if($config->{best_hits_only}==1){																
+    	print OUT "$id\t$lca\t$best_evalue\n";
+    } else {
+    	print OUT "$id\t$lca\t$best_evalue\t$worst_evalue\n";
+    }
+    close OUT;
+    if($config->{combine_PE_lca}==1){
+    	open(IN,"<","$output_dir/$name\_lca-independent.out") or confess "Error: &blast2lca unable to open input: $output_dir/$name\_lca-independent.out because: $!\n";
+    	open(OUT1,">","$output_dir/$name\_lca-conservative.out") or confess "Error: &blast2lca unable to open output: $output_dir/$name\_lca-conservative.out because: $!\n";
+    	open(OUT2,">","$output_dir/$name\_lca-liberal.out") or confess "Error: &blast2lca unable to open output: $output_dir/$name\_lca-liberal.out because: $!\n";
+    	my $continue = 1; 
+    	while($continue==1){
+    		my $line1 = <IN>;
+    		my $line2 = <IN>;
+    		if(!$line1 || !$line2){$continue=0;}
+    		NEXT:
+    		my @f1 = split(/\t/,$line1);
+    		my @f2 = split(/\t/,$line2);
+    		my $id1 = $f1[0];
+    		my $id2 = $f2[0];
+    		$id1 =~ /([A-Za-z0-9-.|:]+)(\_?[1,2]?)/;
+    		my $id1_short = $1;
+    		$id2 =~ /([A-Za-z0-9-.|:]+)(\_?[1,2]?)/;
+    		my $id2_short = $1;
+    		if($id1_short ne $id2_short){
+    			$line1 = $line2; 
+    			$line2 = <IN>;
+    			goto NEXT;
+    		}
+    		my $lca1 = @f1[1];
+    		my $lca2 = @f2[1];
+    		my $conservative_lca = &_find_lca([$lca1,$lca2]);
+    		# Calculate Liberal LCA
+    		my $liberal_lca;
+    		if($lca1 =~ $lca2 || $lca2 =~ $lca1){
+    			if(length($lca1) >= length($lca2)){
+    				$liberal_lca = $lca1;
+    			} else {
+    				$liberal_lca = $lca2;
+    			}
+    		}
+    		print OUT1 "$id1_short\t$conservative_lca\n";
+    		print OUT2 "$id1_short\t$liberal_lca\n";
+    	}
+    	close OUT1;
+    	close OUT2;
+    }
     if($self->{verbose}){print STDERR "======== &blast2lca: Finished ========\n";}
-    return "$output_dir/$name\_lca.out";
+    return "$output_dir/$name\_lca-independent.out";
 }
 
 sub _prep_lca_print {
@@ -1200,9 +1268,7 @@ sub _prep_lca_print {
     my @reads = keys %$hits_by_readname;
     if(scalar @reads > 1) {
         
-        
-        # First we'll find the LCA requiring both reads to match the same
-        # taxon id.
+        # First we'll find the LCA requiring both reads to match the same taxon id.
         my @good_lineages;
         my @read1_lineages;
         map {
@@ -1216,6 +1282,7 @@ sub _prep_lca_print {
         map {
             push(@read2_lineages,$hits_by_readname->{$reads[1]}->{$_});
         }keys %{$hits_by_readname->{$reads[1]}};
+        
         my $paired_lca = &_find_lca(\@good_lineages);
         push(@$vals,$paired_lca);
         
@@ -1224,16 +1291,17 @@ sub _prep_lca_print {
         my $read1_lca = &_find_lca(\@read1_lineages);
         my $read2_lca = &_find_lca(\@read2_lineages);
         
-        my $liberal_lca = &_find_lca([$read1_lca,$read2_lca]);
+        ## These two LCA's only apply to combine PE read LCA's
+        my $conservative_lca = &_find_lca([$read1_lca,$read2_lca]);					## Take the shorter but most parsimonious LCA. 
 
-        if($read1_lca =~ $read2_lca) {
-            $liberal_lca = $read2_lca;
-        }
-        elsif($read2_lca =~ $read1_lca) {
-            $liberal_lca = $read1_lca;
+        my $liberal_lca;															## Take the longer LCA if the shorter LCA is a substring of the longer LCA. 
+        if($read1_lca =~ $read2_lca || $read2_lca =~ $read1_lca){
+            if(length($read1_lca)>=length($read2_lca)) {$liberal_lca=$read1_lca;}
+            if(length($read2_lca)>=length($read1_lca)) {$liberal_lca=$read2_lca;}
         }
 
         push(@$vals,$liberal_lca);
+        push(@$vals,$conservative_lca);
         $hits_by_readname = {};
     }
     else {
@@ -1245,8 +1313,7 @@ sub _prep_lca_print {
 
 sub _find_lca {
     my $lineages = shift;
-
-    # prime it
+	# prime LCA
     my @lca = split(';', $lineages->[0]);
 
     foreach my $l (@$lineages) {
@@ -1262,11 +1329,6 @@ sub _find_lca {
         }
         @lca = @$newlca;
     }
-    if(! scalar @lca) {
-#        print STDERR "Had no lca @$lineages\n";
-    }
-    #print STDERR join(";",@lca);
-    #print STDERR "\n";
     return join(';',@lca);
 }
 
@@ -1970,19 +2032,19 @@ sub new2 {
 
     ## Now open the config file
     ## First determine the proper file path for the config file
-    if($options->{config_file}=~/^\~(.*)/){$options->{config_file}=File::HomeDir->my_home.$1;}  ## This is incase the user passed a config file like ~/config.file
-    my $config_file = defined $options->{config_file} ? $options->{config_file} : File::HomeDir->my_home."/.lgtseek.config"; ## Open --config_file or the default ~/.lgtseek.config
+    if($options->{conf_file}=~/^\~(.*)/){$options->{conf_file}=File::HomeDir->my_home.$1;}  ## This is incase the user passed a config file like ~/config.file
+    my $conf_file = defined $options->{conf_file} ? $options->{conf_file} : File::HomeDir->my_home."/.lgtseek.conf"; ## Open --conf_file or the default ~/.lgtseek.conf
     ## Open the config file and build a hash of key=>value for each line delimited on white space
-    if(-e $config_file){
+    if(-e $conf_file){
     	my %config;
-    	open(IN, "<", "$config_file") or confess "Can't open config_file: $config_file\n";
+    	open(IN, "<", "$conf_file") or confess "Can't open conf_file: $conf_file\n";
     	while(<IN>){
     		chomp;
     		next if($_=~/^#/);
     		my ($key,$value)=split(/\s+/,$_);
     		$config{$key}=$value;
     	}
-    	close IN or confess "Error: can't close config_file: $config_file\n";
+    	close IN or confess "Error: can't close conf_file: $conf_file\n";
     	## Make sure all keys from --options and config.file have a value, priority goes to --option
 	    ## If a key was passed from --options use the --option=>value if avail, or use config.file=>value
 	    foreach my $opt_key (keys %$options){

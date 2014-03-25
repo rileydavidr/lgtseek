@@ -140,7 +140,7 @@ sub runSam2Lca {
     }
 }
 
-=head2 new
+=head2 writeOutput
 
  Title   : writeOutput
  Usage   : my $output_files = $lgtsam2lca->writeOutput()
@@ -358,7 +358,7 @@ sub find_lca {
     foreach my $l (@$lineages) {
         my $newlca = [];
         my @lineage = split(';',$l);
-        for( my $i = 0; $i < @lineage;$i++) {
+        for( my $i = 0; $i < @lineage; $i++) {
             if($lca[$i] eq $lineage[$i]) {
                 push(@$newlca, $lineage[$i]);
             }
@@ -368,8 +368,6 @@ sub find_lca {
         }
         @lca = @$newlca;
     }
-    #print STDERR join(";",@lca);
-    #print STDERR "\n";
     return join(';',@lca);
 }
 

@@ -25,7 +25,7 @@ sub new {
     my ($class, $args) = @_;
 
     my $self = {};
-    $self->{'nodes'} = $args->{'nodes'} ? $args->{'nodes'} : '/local/db/by_source/ncbi/taxonomy/latest/names.dmp';
+    $self->{'nodes'} = $args->{'nodes'} ? $args->{'nodes'} : '/local/db/by_source/ncbi/taxonomy/latest/nodes.dmp';
     $self->{'names'} = $args->{'names'} ? $args->{'names'} : '/local/db/by_source/ncbi/taxonomy/latest/names.dmp';
     $self->{'gi2tax'} = $args->{'gi2tax'} ? $args->{'gi2tax'} : '/local/db/by_source/ncbi/taxonomy/latest/gi_taxid_nucl.dmp';
     $self->{'chunk_size'} = $args->{'chunk_size'} ? $args->{'chunk_size'} : 10000;
