@@ -25,12 +25,12 @@ sub new {
     my ($class, $args) = @_;
 
     my $self = {};
-    $self->{'nodes'} = $args->{'nodes'} ? $args->{'nodes'} : '/local/db/by_source/ncbi/taxonomy/latest/nodes.dmp';
-    $self->{'names'} = $args->{'names'} ? $args->{'names'} : '/local/db/by_source/ncbi/taxonomy/latest/names.dmp';
-    $self->{'gi2tax'} = $args->{'gi2tax'} ? $args->{'gi2tax'} : '/local/db/by_source/ncbi/taxonomy/latest/gi_taxid_nucl.dmp';
+    $self->{'nodes'} = $args->{'nodes'} ? $args->{'nodes'} : '/local/db/repository/ncbi/blast/20120414_001321/taxonomy/taxdump/nodes.dmp';
+    $self->{'names'} = $args->{'names'} ? $args->{'names'} : '/local/db/repository/ncbi/blast/20120414_001321/taxonomy/taxdump/names.dmp';
+    $self->{'gi2tax'} = $args->{'gi2tax'} ? $args->{'gi2tax'} : '/local/db/repository/ncbi/blast/20120414_001321/taxonomy/taxdump/gi_taxid_nucl.dmp';
     $self->{'chunk_size'} = $args->{'chunk_size'} ? $args->{'chunk_size'} : 10000;
     $self->{'idx_dir'} = $args->{'idx_dir'} ? $args->{'idx_dir'} : '/tmp/';
-    $self->{'host'} = $args->{'host'} ? $args->{'host'} : 'tettelin-lx.igs.umaryland.edu';
+    $self->{'host'} = $args->{'host'} ? $args->{'host'} : 'mongotest1-lx.igs.umaryland.edu:10001';
     $self->{'gi_db'} = $args->{'gi_db'} ? $args->{'gi_db'} : 'gi2taxon';
     $self->{'gi_coll'} = $args->{'gi_coll'} ? $args->{'gi_coll'} : 'gi2taxonnuc';
     $self->{'taxonomy_dir'} = $args->{'idx_dir'} ? $args->{'idx_dir'} : '/tmp';
@@ -42,10 +42,10 @@ sub new {
     if($self->{'type'} eq 'protein') {
         $gi_tax_file = 'gi_taxid_prot.dmp';
     }
-    # print STDERR "Here with $args->{'taxon_dir'}\n";
+    print STDERR "Here with $args->{'taxon_dir'}\n";
     # This option can be used if the user want's to override all the nodes/names params at once
     if($args->{'taxon_dir'}) {
-        # print STDERR "Here with a taxon directory $args->{'taxon_dir'}\n";
+        print STDERR "Here with a taxon directory $args->{'taxon_dir'}\n";
         # Find the nodes, names and nucleotide mapping file
         find(sub {
             if($File::Find::name =~  /nodes.dmp/) {
@@ -122,9 +122,9 @@ sub getTaxon {
             $taxonid = $taxon_lookup->{'taxon'};
         }
         else {
-            print STDERR "Unable to find taxon for $gi, Checking NCBI\n";
+            print STDERR "*** GiTaxon-getTaxon: Unable to find taxon for $gi, Checking NCBI\n";
             my $factory = Bio::DB::EUtilities->new(-eutil => 'esummary',
-#                                       -email => 'mymail@foo.bar',
+                                       -email => 'krobsmells@foo.bar',
                                        -db    => $self->{'type'},
                                        -id    => [$gi]);
             while (my $ds = $factory->next_DocSum) {
@@ -137,7 +137,7 @@ sub getTaxon {
                 }
                 else {
                     $self->{'gi2taxon'}->update({'gi' => "$gi"}, {'gi' => "$gi", 'taxon' => $taxonid}, {'upsert' => 1});
-                    print STDERR "Added $gi\t$taxonid to the db\n";
+                    print STDERR "*** GiTaxon-getTaxon: Added $gi\t$taxonid to the db\n";
                 }
 #                print "ID: ",$ds->get_id,"\n";
                 # flattened mode
@@ -149,10 +149,9 @@ sub getTaxon {
             }
 
         }
-        
         my $taxon = $self->{'db'}->get_taxon(-taxonid => $taxonid);
         if(!$taxon) {
-#        print STDERR "Unable to find taxon for $gi\n";
+            print STDERR "*** GiTaxon-getTaxon: Unable to find taxon for $gi\n";
         }
         if(!$taxon) {
             $retval = {
@@ -176,7 +175,8 @@ sub getTaxon {
                 'name'=> $name, 
                 'lineage'=> join(";", @lineage)
             };
-        }else {
+        } 
+        else {
             print STDERR "Had something other than a Bio::Taxon\n";
 #	print join("\t", $taxonid),"\n";
         }

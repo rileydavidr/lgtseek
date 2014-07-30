@@ -26,6 +26,8 @@ package LGTBestBlast;
 require LGTSeek;
 use strict;
 use File::Basename;
+use Carp;
+$Carp::MaxArgLen = 0;
 $| =1;
 
 # Globals
@@ -59,6 +61,7 @@ my $filter_lineage;
            fasta - Path to a fasta file to search
            blast - Path to an existing blast output
            db - One or more fasta files to use a host references
+           threads - Number of threads to use for blast search
            output_dir - One or more fasta files to use as donor references
            lgtseek - LGTSeek module
            blast_bin - path to blast (Can also contain some arguments)
@@ -115,7 +118,7 @@ sub filterBlast {
         open($fh, "<$input") or die "Unable to open $input\n";
     }
     elsif(!$args->{blast}) {
-        open($fh, "-|", "$args->{blast_bin} -d $args->{db} -m8 -i $input") 
+        open($fh, "-|", "$args->{blast_bin} -a $args->{threads} -d $args->{db} -m8 -i $input") 
             or die "Unable to run: $args->{blast_bin} on: $input with db: $args->{db}\n";
     }
 
@@ -213,7 +216,7 @@ sub _init_lineages {
 
 sub _process_file {
     my $fh = shift;
-
+    use Data::Dumper;
     while(<$fh>) {
         chomp;
         my @new_fields = split(/\t/, $_);
@@ -257,11 +260,11 @@ sub _process_file {
                 }
             }
             else {
-                print STDERR "Unable to find name or lineage for taxon_id $tax->{'taxon_id'} in trace $new_fields[1]\n";
+                carp "Unable to find name or lineage for taxon_id $tax->{'taxon_id'} in trace $new_fields[1]\n";
             }
         }
         else {
-            print STDERR "Unable to find taxon info for $new_fields[1]\n";
+            carp "Unable to find taxon info for $new_fields[1]\n";
         }
     }
     close $fh;

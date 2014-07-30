@@ -48,22 +48,6 @@ sub findLGT {
     $MIN_LENGTH = defined $options->{min_length} ? $options->{min_length}: 0;
     $REF_LINEAGE = defined $options->{ref_lineage} ? $options->{ref_lineage} : 'Homo';
     
-    ## David's old method
-    # if($options->{output_prefix}) {
-    #     $filename = $options->{output_prefix};
-    # }
-    # elsif($options->{input_file_list}) {    ## This might be wrong?
-    #     my($name,$directories,$suffix) = fileparse($options->{input_file_list},qr/\.[^.]*/);
-    #     $filename = $name;
-    #     $output_dir = defined $options->{output_dir} ? "$options->{output_dir}" : "$directories";
-    #     print STDERR "***directories: $output_dir ***\n";
-    # }
-    # if($options->{input}) {
-    #     my($name,$directories,$suffix) = fileparse($options->{input});
-    #     $output_dir = defined $options->{output_dir} ? $options->{output_dir} : $directories;
-    # }
-
-    ## KBS new method
     ## Determine output_dir and prefix
     $filename = 'lgt_finder';
     if($options->{input_file_list}) {
@@ -94,7 +78,6 @@ sub findLGT {
                 $prefix = $1;
             }
             if($prefix && ($prefix ne $old_prefix)) {
-                # print STDERR "$prefix is the new prefix going to look for lgt in trace\n";
                 &_find_lgt_in_trace();
                 $traces_by_trace_id = {};
                 $old_prefix = $prefix;
@@ -133,9 +116,9 @@ sub findLGT {
         close OUTTRACE;
     }
 
-    ##
+
     my $valid_count = `grep ';$options->{lineage1};' $output_dir/$filename\_by_clone.txt | grep ';$options->{lineage2};' | wc -l`;
-    my $valid_int_count = `wc -l $output_dir/$filename\_by_trace.txt`;
+    my $valid_int_count = `wc -l $output_dir/$filename\_by_trace.txt | cut -f1 -d \' \'`;
     chomp $valid_count;
     chomp $valid_int_count;
     return {
@@ -206,9 +189,6 @@ sub _process_overall {
             $filtered_clones->{$hit->{template_id}} = 1;
         }
         if(!&filter_genera($genera) && !$filtered_clones->{$hit->{template_id}}) {
-#            if(!$traces_by_template->{$hit->{template_id}}->{$dir}->{hits}) {
-#                $traces_by_template->{$hit->{template_id}}->{$dir}->{hits} = [];
-#            }
             $traces_by_template->{$hit->{template_id}}->{$dir}->{traces}->{$hit->{trace_id}} = 1;
             $hit->{genera} = $genera;
 
@@ -241,26 +221,9 @@ sub _process_overall {
             push(@{$traces_by_template->{$hit->{template_id}}->{$dir}->{genera}->{$genera}},$hit->{trace_id});
         }
     }
-    # This strategy was too memory intensive
-    
-#        if(!$traces_by_template->{$hit->{template_id}}) {
-#            $traces_by_template->{$hit->{template_id}} = {
-#                forward_hits => {},
-#                reverse_hits => {}
-#            };
-#        }
-#        my $trace = $traces_by_template->{$hit->{template_id}}->{$dir}->{$hit->{trace_id}};
-#        if(!$trace) {
-#            $traces_by_template->{$hit->{template_id}}->{$dir}->{$hit->{trace_id}} = {};
-#            $trace = $traces_by_template->{$hit->{template_id}}->{$dir}->{$hit->{trace_id}};
-#        }
-#        if(!$trace->{$type}) {
-#            $trace->{$type} = [];
-#        }
-#        push(@{$trace->{$type}}, $hit);
-#    }
     close IN2;
 }
+
 sub find_lgt {
 
     if(keys %$traces_by_template) {
@@ -295,8 +258,6 @@ sub find_lca {
     if(! scalar @lca) {
 #        print STDERR "Had no lca @$lineages\n";
     }
-    #print STDERR join(";",@lca);
-    #print STDERR "\n";
     return join(';',@lca);
 }
 
@@ -424,41 +385,6 @@ sub get_overlap_length {
 sub _find_lgt_in_clone {
     my $lgt_by_genera = {};
     foreach my $clone (keys %$traces_by_template) {
-#       print STDERR "Processing $clone\n"; 
-#        my $forward_genera = {};
-#        my $reverse_genera = {};
-
-#        my $filter = 0;
-#        foreach my $trace_id (keys %{$traces_by_template->{$clone}->{'forward_hits'}}) {
-            
-#            my $best_hits = $traces_by_template->{$clone}->{'forward_hits'}->{$trace_id}->{'overall'};
-
-#            map {
-#                $_->{'scientific_name'} =~ /^(\w+) /;
-#                if(!&filter_genera($1)) {
-#                    $forward_genera->{$1} = 1;
-#                    if(&filter_clone($_->{'scientific_name'})) {
-#                        $filter = 1;
-#                    }
-#                }
-#            } @$best_hits;
-#        }
-
-#        foreach my $trace_id (keys %{$traces_by_template->{$clone}->{'reverse_hits'}}) {
-            
-#            my $best_hits = $traces_by_template->{$clone}->{'reverse_hits'}->{$trace_id}->{'overall'};
-
-#            map {
-#                $_->{'scientific_name'} =~ /^(\w+) /;
-#                if(!&filter_genera($1)) {
-#                    $reverse_genera->{$1} = 1;
-#                    if(&filter_clone($_->{'scientific_name'})) {
-#                        $filter = 1;
-#                    }
-#                }
-#            } @$best_hits;
-#        }
-
         if(!$filtered_clones->{$clone}) {
             my $forward = join(",", keys %{$traces_by_template->{$clone}->{forward}->{genera}});
             my $flineage = join(",", keys %{$traces_by_template->{$clone}->{forward}->{lineages}});
@@ -466,19 +392,17 @@ sub _find_lgt_in_clone {
             my $rlineage = join(",", keys %{$traces_by_template->{$clone}->{reverse}->{lineages}});
 
             if($forward && $reverse) {
-
                 my $fwd_traces = [];
                 my $rev_traces = [];
                 
                 my $fhit = $traces_by_template->{$clone}->{forward}->{hit};
                 my $nft = scalar keys %{$traces_by_template->{$clone}->{forward}->{traces}};
                 push(@$fwd_traces, join("\t",($fhit->{trace_id},$fhit->{evalue},$fhit->{align_len},$fhit->{lca},$fhit->{hit_filter})));
-                my @Ffields = ($clone,'F',$nft,$forward,join(",",@$fwd_traces));		## KBS added F to fields to delineate between this and thenext @fields
+                my @Ffields = ($clone,'F',$nft,$forward,join(",",@$fwd_traces));		## KBS added F to fields to delineate between this and the next @fields
                 if($options->{append_links}) {
                     push(@Ffields,("driley-lx:8080/blast/$clone\_F.html","http://www.ncbi.nlm.nih.gov/Traces/trace.cgi?&cmd=retrieve&val=TEMPLATE_ID%20%3D%20%22".$clone."%22%20and%20SPECIES_CODE%20%3D%20%22HOMO%20SAPIENS%22%20and%20TRACE_END%20%3D%20%22FORWARD%22&dopt=trace&size=2&dispmax=5&seeas=Show"));
                 }
                 my $fline =  join("\t",@Ffields);
-
                 my $rhit = $traces_by_template->{$clone}->{reverse}->{hit};
                 my $nrt = scalar keys %{$traces_by_template->{$clone}->{forward}->{traces}};
                 push(@$rev_traces, join("\t",($rhit->{trace_id},$rhit->{evalue},$rhit->{align_len},$rhit->{lca},$rhit->{hit_filter})));
@@ -490,7 +414,7 @@ sub _find_lgt_in_clone {
                 
                 my $output_line = 0;
                 if($flineage =~ /$REF_LINEAGE/ && $rlineage !~ /$REF_LINEAGE/) {
-#                if($forward =~ /$REF_LINEAGE/ && $reverse !~ /$REF_LINEAGE/) {
+                # if($forward =~ /$REF_LINEAGE/ && $reverse !~ /$REF_LINEAGE/) {
                     my @outfields = ($clone,$reverse,$forward,join(",",@$rev_traces),join(",",@$fwd_traces));
                     if($options->{append_links}) {
                         push(@outfields,("driley-lx:8080/blast/$clone\_R.html","driley-lx:8080/blast/$clone\_F.html"));
@@ -511,7 +435,7 @@ sub _find_lgt_in_clone {
                 }
                 #elsif($reverse !~ /$REF_LINEAGE/ && $forward !~ /$REF_LINEAGE/) {
                 elsif($rlineage !~ /$REF_LINEAGE/ && $flineage !~ /$REF_LINEAGE/) {
-                    print "$fline\n$rline\n";
+                    # print "$fline\n$rline\n";
                     my @outfields = ($clone,$forward,$reverse,join(",",@$fwd_traces),join(",",@$rev_traces));
                     if($options->{append_links}) {
                         push(@outfields,("driley-lx:8080/blast/$clone\_R.html","driley-lx:8080/blast/$clone\_F.html"));
@@ -520,7 +444,7 @@ sub _find_lgt_in_clone {
                     push(@{$lgt_by_genera->{$forward.":".$reverse}},$clone);
                 }
                 else {
-                    print "$fline\n$rline\n";
+                    # print "$fline\n$rline\n";
                     my @outfields = ($clone,$forward,$reverse,join(",",@$fwd_traces),join(",",@$rev_traces));
                     if($options->{append_links}) {
                         push(@outfields,("driley-lx:8080/blast/$clone\_R.html","driley-lx:8080/blast/$clone\_F.html"));
