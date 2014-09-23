@@ -159,9 +159,9 @@ sub getGiTaxon {
 
 sub prinseqFilterBam {
     my ( $self, $config ) = @_;
-    if ( !$config->{input_bam} ) { $self->fail("Must pass &prinseqFilterBam an input_bam =>\n"); }
+    if ( !$config->{input_bam} ) { $self->fail("*** Error *** Must pass &prinseqFilterBam an input_bam =>\n"); }
     if ( $self->empty_chk( { input => $config->{input_bam} } ) == 1 ) {
-        print STDERR "Warning: &prinseqFilterBam input: $config->{input} is empty.\n";
+        print STDERR "*** Warning ***: &prinseqFilterBam input: $config->{input} is empty.\n";
     }
     if ( $self->{verbose} ) { print STDERR "======== &prinseqFilterBam: Start ========\n"; }
 
@@ -177,7 +177,7 @@ sub prinseqFilterBam {
     }
 
     if ( !$self->{ergatis_bin} || !$self->{prinseq_bin} ) {
-        $self->fail("Must provide an ergatis_bin and prinseq_bin parameter to run prinseq filtering $self->{prinseq_bin} $self->{ergatis_bin}\n");
+        $self->fail("*** Error *** Must provide an ergatis_bin and prinseq_bin parameter to run prinseq filtering $self->{prinseq_bin} $self->{ergatis_bin}\n");
     }
 
     my $retval;
@@ -185,7 +185,7 @@ sub prinseqFilterBam {
         $retval = $self->_prinseqFilterPaired( $config->{input_bam}, $config->{output_dir}, $overwrite );
     }
     else {
-        $self->fail("Single end is currently not implemented\n");
+        $self->fail("*** Error *** Single end is currently not implemented\n");
     }
     if ( $self->{verbose} ) { print STDERR "======== &prinseqFilterBam: Finished ========\n"; }
     $self->time_check;
@@ -383,7 +383,7 @@ sub _run_cmd {
     my $res = `$cmd`;
     if ($?) {
         print STDERR "$cmd\n\n$?";
-        $self->fail("$cmd died with message:\n$res\n\n");
+        $self->fail("*** Error *** $cmd died with message:\n$res\n\n");
     }
     return $res;
 }
@@ -423,10 +423,10 @@ sub downloadSRA {
     }
 
     if ( !$self->{aspera_path} ) {
-        $self->fail("Need to specify an aspera_path (where is aspera installed) in order to download from the sra\n");
+        $self->fail("*** Error *** Need to specify an aspera_path (where is aspera installed) in order to download from the sra\n");
     }
     if ( !$self->{output_dir} ) {
-        $self->fail("Need to specify an output_dir in order to download from the sra\n");
+        $self->fail("*** Error *** Need to specify an output_dir in order to download from the sra\n");
     }
 
     my $prefix;
@@ -524,7 +524,7 @@ sub dumpFastq {
         $cutoff_version = version->parse('2.1.0');
     }
     else {
-        $self->fail("$? $ret $fastqdump_bin\n");
+        $self->fail("*** Error *** $? $ret $fastqdump_bin\n");
     }
     if ( $version > $cutoff_version ) {
 
@@ -532,7 +532,7 @@ sub dumpFastq {
     }
     $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     if ( !$self->{output_dir} ) {
-        $self->fail("Need to specify an output_dir in order to download from the sra\n");
+        $self->fail("*** Error *** Need to specify an output_dir in order to download from the sra\n");
     }
 
     my ( $name, $path, $suff ) = fileparse( $config->{sra_file}, ".sra" );
@@ -732,7 +732,7 @@ sub runBWA {
     # Handle making up the lgt_bwa command with a bam file
     if ( $config->{input_bam} ) {
         if ( $self->empty_chk( { input => $config->{input_bam} } ) == 1 ) {
-            print STDERR "Error: &runBWA input: $config->{input_bam} is empty.\n";
+            print STDERR "*** Error *** &runBWA input: $config->{input_bam} is empty.\n";
             return $config->{input_bam};
         }
         my ( $name, $path, $suff ) = fileparse( $config->{input_bam}, ( "_prelim.bam", ".bam" ) );
@@ -1235,7 +1235,7 @@ sub blast2lca {
     my ( $name, $directories, $suffix ) = fileparse( $config->{blast}, qr/\.[^.]*/ );
     $name = $config->{output_prefix} ? $config->{output_prefix} : $name;
     open OUT, ">$output_dir/$name\_lca-independent.out"
-        or confess "Error: &blast2lca unable to open $output_dir/$name\_lca-independent.out";
+        or confess "*** Error *** &blast2lca unable to open $output_dir/$name\_lca-independent.out";
     if ( $config->{best_hits_only} == 1 ) {
         print OUT join( "\t", ( 'read_id', 'lca', 'best_evalue' ) );
     }
@@ -1303,11 +1303,11 @@ sub blast2lca {
 
     if ( $config->{combine_PE_lca} == 1 ) {
         open( IN, "<", "$output_dir/$name\_lca-independent.out" )
-            or confess "Error: &blast2lca unable to open input: $output_dir/$name\_lca-independent.out because: $!\n";
+            or confess "*** Error *** &blast2lca unable to open input: $output_dir/$name\_lca-independent.out because: $!\n";
         open( OUT1, ">", "$output_dir/$name\_lca-conservative.out" )
-            or confess "Error: &blast2lca unable to open output: $output_dir/$name\_lca-conservative.out because: $!\n";
+            or confess "*** Error *** &blast2lca unable to open output: $output_dir/$name\_lca-conservative.out because: $!\n";
         open( OUT2, ">", "$output_dir/$name\_lca-liberal.out" )
-            or confess "Error: &blast2lca unable to open output: $output_dir/$name\_lca-liberal.out because: $!\n";
+            or confess "*** Error *** &blast2lca unable to open output: $output_dir/$name\_lca-liberal.out because: $!\n";
         my $continue = 1;
         while ( $continue == 1 ) {
             my $line1 = <IN>;
@@ -1525,7 +1525,7 @@ sub splitBam {
     my ( $self, $config ) = @_;
     if ( !$config->{input} ) { die "Must give &splitBam an input =>\n"; }
     if ( $self->empty_chk( { input => $config->{input} } ) == 1 ) {
-        print STDERR "Warning: &split_bam input: $config->{input} is empty.\n";
+        print STDERR "*** Warning *** &split_bam input: $config->{input} is empty.\n";
     }
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     if ( $self->{verbose} ) { print STDERR "======== &splitBam: Start ========\n"; }
@@ -1647,10 +1647,10 @@ sub _parseFlag {
 sub decrypt {
     my ( $self, $config ) = @_;
     if ( !$config->{input} || $config->{input} !~ /\.bam\.gpg$/ ) {
-        die "Error: Must pass an encrypted .bam.gpg to this subroutine.\n";
+        die "*** Error *** Must pass an encrypted .bam.gpg to this subroutine.\n";
     }
     if ( !$config->{url} && !$config->{key} ) {
-        die "Must give an url to download the key from or the path to the key.\n";
+        die "*** Error *** Must give an url to download the key from or the path to the key.\n";
     }
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     if ( $self->{verbose} ) { print STDERR "======== &Decrypt: Start ========\n"; }
@@ -1692,9 +1692,9 @@ sub decrypt {
 
 sub mpileup {
     my ( $self, $config ) = @_;
-    if ( !$config->{input} && !$config->{srtd_bam} ) { die "Error: Must give an input bam to calculat coverage on.\n"; }
+    if ( !$config->{input} && !$config->{srtd_bam} ) { die "*** Error *** Must give an input bam to calculat coverage on.\n"; }
     my $input = $config->{input} ? $config->{input} : $config->{srtd_bam};
-    if ( $self->empty_chk( { input => $input } ) == 1 ) { print STDERR "Warning: &mpileup input: $input is empty.\n"; }
+    if ( $self->empty_chk( { input => $input } ) == 1 ) { print STDERR "*** Warning *** &mpileup input: $input is empty.\n"; }
     my $overwrite = $config->{overwrite} ? $config->{overwrite} : 0;
     my ( $fn, $path, $suffix ) = fileparse( $config->{input}, '.bam' );
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
@@ -1702,7 +1702,7 @@ sub mpileup {
     if ( $self->{verbose} ) { print STDERR "======== &mpileup: Start ========\n"; }
 
     if ( -e $output && $overwrite == 0 ) {
-        print STDERR "Already found the output for &mpileup: $output\n";
+        print STDERR "*** Warning *** Already found the output for &mpileup: $output\n";
         return $output;
     }
     $self->_run_cmd("mkdir -p $output_dir");
@@ -1753,7 +1753,7 @@ sub prelim_filter {
     my ( $self, $config ) = @_;
     my $input = $config->{input_bam} ? $config->{input_bam} : $self->{input_bam};
     if ( $self->empty_chk( { input => $input } ) == 1 ) {
-        print STDERR "Warning: &prelim_filter input: $input is empty.\n";
+        print STDERR "*** Warning *** &prelim_filter input: $input is empty.\n";
     }
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->_run_cmd("mkdir -p $output_dir");
@@ -1768,39 +1768,69 @@ sub prelim_filter {
     my ( $fn, $path, $suffix ) = fileparse( $input, ( '.srt.bam', '.bam' ) );
     my $header = $self->_run_cmd("samtools view -H $input");
     my @output_list;    ## Array of output bams to return
+   
     ## Check if the output exists already
     ## $output isn't set right at this point in the scrip to check if the final output already exist. FIX later.
     my $files_exist = 0;
     if ( -e "$output_dir$fn\_0_prelim.bam" ) { $files_exist = 1; }
     if ( $files_exist == 1 && $overwrite == 0 ) {
         if ( $self->{verbose} ) {
-            print STDERR "Already found the output for &prelim_filter: $output_dir$fn\_0_prelim.bam\n";
+            print STDERR "***Warning*** Already found the output for &prelim_filter: $output_dir$fn\_0_prelim.bam\n";
         }
         chomp( my @output_list = `find $output_dir -name '$fn\*_prelim.bam'` );
         return \@output_list;
     }
+   
     ## Check we dont' have the name-sorted.bam already
     my $sorted_bam = "$output_dir$fn\_name-sorted.bam";
     if ( -e "$sorted_bam" ) { $files_exist = 1; }
     if ( $files_exist == 1 && $overwrite == 0 ) {
         if ( $self->{verbose} ) {
-            print STDERR "Already found &prelim_filter \$sorted_bam, starting to filter: $sorted_bam.\n";
+            print STDERR "*** Warning *** Already found &prelim_filter \$sorted_bam, starting to filter: $sorted_bam.\n";
         }
-        $prelim_filter = 0;
+        $name_sort_input = 0;
     }
+
     ## (1). Sort the bam by name instead of position
     if ( $name_sort_input == 1 ) {
-        if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Sort Start ========\n"; }
+        if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Sort Start ========\n"; $self->time_check; }
         my $cmd = "samtools sort -n -@ $self->{threads} -m $self->{sort_mem} $input $output_dir$fn\_name-sorted";
         if ( $self->{verbose} ) { print STDERR "======== &prelim_filter Sort: $cmd ===\n"; }
         $self->_run_cmd("$cmd");
-        if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Sort Finished ========\n"; }
+        if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Sort Finished ========\n"; $self->time_check; }
         $self->time_check;
     }
     else {
         $sorted_bam = $input;
     }
-    ## (2). Prelim filtering.
+
+    ## (2). QUICK Check to make sure the reads are PE and name sorted properly.
+    if ( $self->{verbose} ) { print STDERR "======== &prelim_filter 2x Check PE & name sort: Start ========\n"; $self->time_check; }
+    open( my $chk, "samtools view $sorted_bam | head |" ) or $self->fail("*** Error *** &prelim_filter can't open the name-sorted-input.bam: $sorted_bam\n");
+    my %dbl_chk_hash;
+    while (<$chk>) {
+        chomp;
+        my @line = split;
+        my $read = $line[0];
+        $read =~ s/(\/\d{1})$//;
+        $dbl_chk_hash{$read}++;
+    }
+    close $chk;
+
+    my $die_count = 0;
+    foreach my $reads ( keys %dbl_chk_hash ) {
+        if ( $dbl_chk_hash{$reads} != 2 ) {
+            $die_count++;
+            print STDERR "*** Warning *** This read is missing the mate: $reads \n";
+        }
+    }
+
+    if ( $die_count >= 2 ) {
+        die "*** Error *** This bam is missing atleast 2 PE mate-pairs in the first 10 reads. It is highly likely this bam isn't PE or name sorted properly. Please fix this and try again.\n";
+    }
+    if ( $self->{verbose} ) { print STDERR "======== &prelim_filter 2x Check PE & name sort:: Finished ========\n"; $self->time_check; }
+
+    ## (3). Prelim filtering.
     my $more_lines     = 1;
     my $num_pass       = 0;
     my $num_null       = 0;
@@ -1811,12 +1841,12 @@ sub prelim_filter {
         my $i      = 0;                                       ## Used to count number of lines per bam as being processed
         my $count  = 0;                                       ## Used to count number of split output bams
         my $output = "$output_dir/$fn\_$count\_prelim.bam";
-        open( my $out, "| samtools view -S - -bo $output" ) || $self->fail("Can't open: $output because: $!\n");
+        open( my $out, "| samtools view -S - -bo $output" ) || $self->fail("*** Error *** Can't open: $output because: $!\n");
         print $out "$header";
         push( @output_list, $output );
 
         ## Open input bam
-        open( my $infh, "samtools view $sorted_bam |" ) || $self->fail("&prelim_filter can't open the \$sorted_bam: $sorted_bam because: $1\n");
+        open( my $infh, "samtools view $sorted_bam |" ) || $self->fail("*** Error *** &prelim_filter can't open the \$sorted_bam: $sorted_bam because: $1\n");
         ## (2). Actual Prelim Filtering starting:
         ##      Read through and filter bam reads, splitting output as we go
 
@@ -1828,10 +1858,10 @@ sub prelim_filter {
             if ( !$read1 || !$read2 ) { $more_lines = 0; last; }
             ## (3). Split output: close the current output and open a new output
             if ( $i >= $seqs_per_file && $split_bam == 1 ) {
-                close $out or $self->fail("Unable to close &prelim_filter output: $output\n");
+                close $out or $self->fail("*** Error *** Unable to close &prelim_filter output: $output\n");
                 $count += 1;
                 $output = "$output_dir/$fn\_$count\_prelim.bam";
-                open( $out, "| samtools view -S - -bo $output" ) || $self->fail("Can't open: $output because: $!\n");
+                open( $out, "| samtools view -S - -bo $output" ) || $self->fail("*** Error *** Can't open: $output because: $!\n");
                 push( @output_list, $output );
                 print $out "$header";
                 $i = 0;
@@ -1862,22 +1892,8 @@ sub prelim_filter {
             my $converted_flag1 = $self->_parseFlag($flag1);
             my $converted_flag2 = $self->_parseFlag($flag2);
             ## FILTER OUT seconday aln reads
-            next if ( $converted_flag1->{'secondary'} ||  $converted_flag2->{'secondary'} );
-            # while ( $converted_flag1->{'secondary'} ) {
-            #     $read1 = $read2;
-            #     $read2 = <$infh>;
-            #     ( $id1, $flag1, $cigar1, $sequence1 ) = ( split /\t/, $read1 )[ 0, 1, 5, 9 ];
-            #     ( $id2, $flag2, $cigar2, $sequence2 ) = ( split /\t/, $read2 )[ 0, 1, 5, 9 ];
-            #     $converted_flag1 = $self->_parseFlag($flag1);
-            #     $converted_flag2 = $self->_parseFlag($flag2);
-            # }
-            # while ( $converted_flag2->{'secondary'} ) {
-            #     $read2 = <$infh>;
-            #     ( $id2, $flag2, $cigar2, $sequence2 ) = ( split /\t/, $read2 )[ 0, 1, 5, 9 ];
-            #     $converted_flag2 = $self->_parseFlag($flag2);
-            # }
+            next if ( $converted_flag1->{'secondary'} || $converted_flag2->{'secondary'} );
 
-            
             ## FILTER FOR reads that are UM (M_UM,UM_M,UM_UM)
             if ( $converted_flag1->{'qunmapped'} || $converted_flag1->{'munmapped'} ) { $print = 1; }
             ## FILTER FOR soft clipped reads
@@ -1909,12 +1925,13 @@ sub prelim_filter {
             my $remove_empty_bam = pop(@output_list);
         }
         if ( $name_sort_input == 1 && $sorted_bam =~ /name-sorted.bam$/ ) { $self->_run_cmd("rm $sorted_bam"); }
+        if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Filter Finished ========\n"; $self->time_check; }
     }
     else {
         push( @output_list, $sorted_bam );
     }
     $self->time_check;
-    if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Filter Finished ========\n"; }
+
     my @sort_out_list = sort @output_list;
     if ( $self->{verbose} ) {
         print STDERR "======== &prelim_filter: Singletons:$num_singletons ==\n";
@@ -1947,14 +1964,14 @@ sub filter_bam_by_ids {
     my ( $self, $config ) = @_;
     if ( $self->{verbose} ) { print STDERR "======== &filter_bam_by_ids: Start ========\n"; }
     if ( !$config->{input_bam} ) {
-        $self->fail("Error: Must pass &filter_bam_by_ids an input_bam => <BAM_TO_FILTER>\n");
+        $self->fail("*** Error *** Must pass &filter_bam_by_ids an input_bam => <BAM_TO_FILTER>\n");
     }
     if ( $self->empty_chk( { input => "$config->{input_bam}" } ) == 1 ) {
-        print STDERR "Warning: Can not filter ids from an empty input bam: $config->{input_bam}\n";
+        print STDERR "*** Warning ***: Can not filter ids from an empty input bam: $config->{input_bam}\n";
         return { count => 0, file => $config->{input_bam} };
     }
     if ( !$config->{good_list} && !$config->{bad_list} ) {
-        $self->fail("Error: Must pass &filter_bam_by_ids a file with a list of reads to filter on. Use good_list => || bad_list => \n");
+        $self->fail("*** Error *** Must pass &filter_bam_by_ids a file with a list of reads to filter on. Use good_list => || bad_list => \n");
     }
     ## Setup hash of ids
     my $good_ids = {};
@@ -1972,9 +1989,9 @@ sub filter_bam_by_ids {
     my $cmd     = "samtools view -H $input";
     my $header  = $self->_run_cmd($cmd);
     open( my $in, "-|", "samtools view $input" )
-        or $self->fail("&filter_bam_by_ids can't open input bam: $input because: $!\n");
+        or $self->fail("*** Error *** &filter_bam_by_ids can't open input bam: $input because: $!\n");
     open( my $fh, "| samtools view -S - -bo $out" )
-        or $self->fail("&filter_bam_by_ids can't open  output bam: $out because: $!\n");
+        or $self->fail("*** Error *** &filter_bam_by_ids can't open  output bam: $out because: $!\n");
     print $fh "$header";
 
     while (<$in>) {
@@ -2007,13 +2024,13 @@ sub filter_bam_by_ids {
 
 sub _read_ids {
     my ( $self, $config ) = @_;
-    if ( !$config->{list} ) { $self->fail("Must pass &_read_ids a list =>\n"); }
+    if ( !$config->{list} ) { $self->fail("*** Error *** Must pass &_read_ids a list =>\n"); }
     if ( $self->empty_chk( { input => $config->{list} } ) == 1 ) {
-        carp "Warning: &_read_ids input: $config->{list} is empty\n";
+        carp "*** Warning ***: &_read_ids input: $config->{list} is empty\n";
     }
     my $file = $config->{list};
     my %hash;
-    open IN, "<$file" or $self->fail("&_read_ids unable to open: $file because: $!\n");
+    open IN, "<$file" or $self->fail("*** Error *** &_read_ids unable to open: $file because: $!\n");
     while (<IN>) {
         chomp;
         $hash{$_} = 1;
@@ -2034,7 +2051,7 @@ sub _read_ids {
 
 sub empty_chk {
     my ( $self, $config ) = @_;
-    if ( !$config->{input} ) { $self->fail("Must pass &empty_chk a file."); }
+    if ( !$config->{input} ) { $self->fail("*** Error *** Must pass &empty_chk a file."); }
     my $file  = $config->{input};
     my $empty = 0;                  ## 0 = False, 1=True, file is empty.
     my $count;
@@ -2047,7 +2064,7 @@ sub empty_chk {
     else {
         $count = `head $file | wc -l`;
     }
-    if ($?) { $self->fail("&empty_chk could not check: $config->{input}\n"); }
+    if ($?) { $self->fail("*** Error *** &empty_chk could not check: $config->{input}\n"); }
     if ( $count == 0 ) { $empty = 1; }
     return $empty;
 }
@@ -2086,10 +2103,10 @@ sub fail {
 sub validated_bam {
     my ( $self, $config ) = @_;
     if ( !$config->{input} ) {
-        $self->fail("Must pass &validated_bam an input bam to parse reads from with input =>.\n");
+        $self->fail("*** Error *** Must pass &validated_bam an input bam to parse reads from with input =>.\n");
     }
     if ( !$config->{by_clone} && !$config->{by_trace} ) {
-        $self->fail("Must pass &validated_bam an LGTFinder output with by_clone => or by_trace=>.\n");
+        $self->fail("*** Error *** Must pass &validated_bam an LGTFinder output with by_clone => or by_trace=>.\n");
     }
 
     my $input = "$config->{input}";
@@ -2104,13 +2121,14 @@ sub validated_bam {
     }
 
     open( IN, "<", "$config->{by_clone}" )
-        || $self->fail("ERROR: &validated_bam can not open input: $config->{by_clone}\n");
+        || $self->fail("*** Error *** &validated_bam can not open input: $config->{by_clone}\n");
     open( OUT, ">", "$out_dir/$prefix\_valid_blast_read.list" )
-        || $self->fail("ERROR: &validated_bam can not open output: $out_dir/$prefix\_valid_blast.list\n");
+        || $self->fail("*** Error *** &validated_bam can not open output: $out_dir/$prefix\_valid_blast.list\n");
     ##  Make a list of reads from lgt_finder that have a "valid blast."
     while (<IN>) {
         chomp;
         my ( $read, $otu1, $otu2, $lca1, $lca2 ) = ( split /\t/, $_ )[ 0, 1, 2, 6, 11 ];
+
         # This needs to be checked. Might be too stringent? 12.04.13 KBS. This is also super specific for human lgt ...
         next if ( $otu1 =~ /Homo/      && $otu2 =~ /Homo/ );
         next if ( $otu1 !~ /Homo/      && $otu2 !~ /Homo/ );
@@ -2118,9 +2136,9 @@ sub validated_bam {
         next if ( $lca1 =~ /Bacteria/  && $lca2 =~ /Bacteria/ );
         print OUT "$read\n";
     }
-    close IN || $self->fail("ERROR: &validated_bam can't close input by_clone: $config->{by_clone} because: $!\n");
+    close IN || $self->fail("*** Error *** &validated_bam can't close input by_clone: $config->{by_clone} because: $!\n");
     close OUT
-        || $self->fail("ERROR: &validated_bam can't close output valid_blast.list: $out_dir/$prefix\_valid_blast_read.list because: $!\n");
+        || $self->fail("*** Error *** &validated_bam can't close output valid_blast.list: $out_dir/$prefix\_valid_blast_read.list because: $!\n");
 
     ## Use the list of blast validated LGT's create a new bam.
     ## $valid_bam is a hash->{count} & ->{file}
@@ -2150,11 +2168,12 @@ sub new2 {
 
     # Usefull list for fileparse: @{$lgtseek->{'list'}}
     my $self = {
-        bam_suffix_list => [ '_resorted.\d+.bam', '_resorted\.bam', '\.gpg\.bam', '_prelim\.bam', '_name-sort\.bam', '_pos-sort\.bam', '_psort\.bam', '_nsort\.bam', '\.srt\.bam', '\.bam' ],
-        sam_suffix_list => [ '.sam.gz',           '.sam' ],
-        fastq_suffix_list   => [ '_\d+\.fastq\.gz', '\.fastq\.gz',   '_\d+\.fastq', '\.fastq', '\.fq' ],
-        fasta_suffix_list   => [ '.fa.gz',          '.fasta.gz',     '.fasta',      '.fa' ],
-        mpileup_suffix_list => [ '.mpileup',        '_COVERAGE.txt', '.txt' ],
+        bam_suffix_list =>
+            [ '_resorted.\d+.bam', '_resorted\.bam', '\.gpg\.bam', '_prelim\.bam', '_name-sort\.bam', '_pos-sort\.bam', '_psort\.bam', '.psort.bam', '_nsort\.bam', '\.srt\.bam', '\.bam' ],
+        sam_suffix_list   => [ '.sam.gz',         '.sam' ],
+        fastq_suffix_list => [ '_\d+\.fastq\.gz', '\.fastq\.gz', '_\d+\.fastq', '\.fastq', '\.fq' ],
+        fasta_suffix_list   => [ '.fa.gz',   '.fasta.gz',     '.fasta', '.fa' ],
+        mpileup_suffix_list => [ '.mpileup', '_COVERAGE.txt', '.txt' ],
         suffix_regex        => qr/\.[^\.]+/,
     };
 
@@ -2177,7 +2196,7 @@ sub new2 {
             my ( $key, $value ) = split( /\s+/, $_ );
             $config{$key} = $value;
         }
-        close IN or confess "Error: can't close conf_file: $conf_file\n";
+        close IN or confess "*** Error *** can't close conf_file: $conf_file\n";
         ## Make sure all keys from --options and config.file have a value, priority goes to --option
         ## If a key was passed from --options use the --option=>value if avail, or use config.file=>value
         foreach my $opt_key ( keys %$options ) {
