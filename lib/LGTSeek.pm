@@ -233,6 +233,7 @@ sub _prinseqFilterPaired {
         return $filtered;
     }
     else {
+
         # Generate concatenated fastq files for prinseq derep filtering
         ## Need to incorporate sam2fasta.pm KBS 01.07.14
         if ( $dedup == 1 ) {
@@ -431,7 +432,7 @@ sub downloadSRA {
 
     my $prefix;
     my $thousand;
-    my $output_dir = $self->{output_dir};
+    my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     my $path_to_file;
 
     # We can pass an experiment_id, run_id or a full path to download
@@ -603,26 +604,12 @@ sub downloadCGHub {
         die "Need to specify an output_dir in order to download for CGHub\n";
     }
 
-    ### New crap 07.01.14 KBS
-    ## Making  a hash of the bam filename = md5 sum.
-    ## This will allow retrying to download if the bam/bai are not finished or correct.
-    my %cghub_md5_hash;
-
-    if ( $config->{analysis_id} ) {
-        $self->_run_cmd("$genetorrent_path\/cgquery \"analysis_id\=$config->{analysis_id}\" -o $output_dir/cgquery.xml");
-    }
-    my $xml = $config->{xml} ? $config->{xml} : "$output_dir/cgquery.xml";
-    my $ref = XMLin( $xml, KeyAttr => { Result => 'id' }, ForceArray => [ 'Result', 'file' ], GroupTags => { files => 'file' } ) or confess "What is gonig on?\n";
-    foreach my $sample ( sort keys %{ $ref->{'Result'} } ) {
-        foreach my $file ( @{ $ref->{'Result'}->{$sample}->{files} } ) {
-            $cghub_md5_hash{ $file->{filename} } = $file->{checksum}->{content};
-        }
-    }
-
     # We can pass an analysis_id (UUID), URI, .xml .gto to download. They can all be called analysis_id and will work the same way.
     my $download = $config->{analysis_id} ? $config->{analysis_id} : $config->{xml};
 
     #Retry the download several times just incase.
+    my @bams_downloaded_list;
+    my @bais_downloaded_list;
     my $retry          = 1;
     my $retry_attempts = 0;
     while ( $retry == 1 && $retry_attempts <= $retry_attempts_max ) {
@@ -631,48 +618,80 @@ sub downloadCGHub {
         my $cmd_string = "$self->{genetorrent_path}/gtdownload --max-children $max_children -r $rate_limit -p $output_dir -c $cghub_key -d $download";
         $self->_run_cmd($cmd_string);
 
-        ## Find a list of the files downloaded
-        my @files;
-        foreach my $files_to_download (%cghub_md5_hash) {
-            chomp( @files = `find $output_dir -name '*$files_to_download'` );
-        }
-        if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Finished downloading, checking md5's ========\n"; }
-        ## Calculate the md5sum
-        my %calculated_md5;
-        foreach my $file (@files) {
-            my $md5 = `md5sum -b $file | cut -f1 -d " "`;
-            $calculated_md5{$file} = $md5;
-        }
-
-        ## Check md5's
-        my $error = 0;
-        foreach my $files ( keys %calculated_md5 ) {
-            if ( $calculated_md5{$files} != $cghub_md5_hash{$files} ) {
-                if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Error downloading: $files  || Going to retry ... retry number: $retry_attempts ========\n"; }
-                $error = 1;
-                $retry_attempts++;
+        ## Making  a hash of the bam filename = md5 sum.
+        ## This will allow retrying to download if the bam/bai are not finished or correct.
+        if ( $config->{analysis_id} ) {
+            if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Downloading cgquery.xml file to get md5 numbers.\n"; }
+            my $cmd = "$genetorrent_path\/cgquery \"analysis_id\=$config->{analysis_id}\" -o $output_dir/cgquery.xml";
+            if ( $self->{verbose} ) { print STDERR "$cmd\n"; }
+            my $cgquery_retry    = 1;
+            my $cgquery_attempts = 0;
+            my $retry_pause      = 3;
+            while ( $cgquery_retry == 1 && $cgquery_attempts <= 3 ) {
+                my $cgquery_exec_return = `$cmd`;
+                if ($?) {
+                    print STDERR "***Error*** :: $cmd :: failed with message: $cgquery_exec_return :: $?. Will now retry cgquery.\n";
+                    $cgquery_attempts += 1;
+                    $retry_pause = $retry_pause * 10;
+                    sleep $retry_pause;
+                }
+                else {
+                    $cgquery_retry = 0;
+                }
             }
         }
-        if ( $error == 0 ) {
-            if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: All md5's look correct ========\n"; }
-            $retry = 0;
+        my %cghub_md5_hash;
+        my $xml = $config->{xml} ? $config->{xml} : "$output_dir/cgquery.xml";
+        my $ref = XMLin( $xml, KeyAttr => { Result => 'id' }, ForceArray => [ 'Result', 'file' ], GroupTags => { files => 'file' } )
+            or confess "======== &downloadCGHub: &XMLin is unable to read in the cgquery.xml file: $xml because: $!\n";
+        foreach my $sample ( sort keys %{ $ref->{'Result'} } ) {
+            foreach my $file ( @{ $ref->{'Result'}->{$sample}->{files} } ) {
+                if ( $file->{filename} =~ /\.bam$|\.bai$/ ) {
+                    $cghub_md5_hash{ $file->{filename} } = $file->{checksum}->{content};
+                }
+            }
         }
-        else {
-            foreach my $file (@files) {
-                $self->_run_cmd("rm $file");
+
+        if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Finished downloading: $download. Checking md5's ========\n"; }
+        ## Find a list of the files downloaded
+        my @files;
+        foreach my $files_to_download ( keys %cghub_md5_hash ) {
+            my $found_file = $self->_run_cmd("find $output_dir -name \'*$files_to_download\'");
+            chomp($found_file);
+            push( @files, $found_file );
+        }
+
+        ## Calculate the md5sum
+        foreach my $full_file_path (@files) {
+            my ( $file_name, $path_to_file ) = fileparse($full_file_path);
+            my $md5 = $self->_run_cmd("md5sum -b $full_file_path | cut -f1 -d \" \"");
+            chomp($md5);
+            if ( $md5 eq $cghub_md5_hash{$file_name} ) {
+                if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: md5 is correct for: $full_file_path ========\n"; }
+                if ( $file_name =~ /\.bam$/ ) {
+                    push( @bams_downloaded_list, $full_file_path );
+                }
+                elsif ( $file_name =~ /\.bai$/ ) {
+                    push( @bais_downloaded_list, $full_file_path );
+                }
+                $retry = 0;
+            }
+            elsif ( $md5 ne $cghub_md5_hash{$file_name} ) {
+                if ( $self->{verbose} ) {
+                    print STDERR
+                        "======== &downloadCGHub: md5 Inconsistency for file: $full_file_path Calculated_md5: $md5 Expected-md5: $cghub_md5_hash{$file_name} || Going to retry download, retry number: $retry_attempts ========\n";
+                }
+                $retry = 1;
+                $retry_attempts++;
             }
         }
     }
 
-    my @bam = `find $output_dir -name *.bam`;
-    my @bai = `find $output_dir -name *.bai`;
-    my @gto = `find $output_dir -name *.gto`;
-
     my $files = {
-        'bam_files' => \@bam,
-        'bai_files' => \@bai,
-        'gto_files' => \@gto
+        'bam_files' => \@bams_downloaded_list,
+        'bai_files' => \@bais_downloaded_list,
     };
+
     if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Finished ========\n"; }
     $self->time_check;
     return $files;
@@ -687,14 +706,16 @@ sub downloadCGHub {
  Args    : The input fasq/bam files and references which can be done a few different ways:
 
            # For files like /path/to/files/SRR01234_1.fastq and /path/to/files/SRR01234_2.fastq
-           {'input_dir' => '/path/to/files/',
-            'input_base' => 'SRR01234',
-            'reference' => '/path/to/references/hg19.fa'
+           {
+              'input_dir' => '/path/to/files/',
+              'input_base' => 'SRR01234',
+              'reference' => '/path/to/references/hg19.fa'
            }
          
            # For bam files and a list of references
-           {'input_bam' => '/path/to/files/SRR01234.bam',
-            'reference_list' => '/path/to/references/all_refs.list'
+           {
+              'input_bam' => '/path/to/files/SRR01234.bam',
+              'reference_list' => '/path/to/references/all_refs.list'
            }
 
 =cut
@@ -796,6 +817,7 @@ sub runBWA {
                             'integration_site_donor_donor' => "$self->{output_dir}/".$prefix."integration_site_donor_donor.bam",
                             'integration_site_donor_host' => "$self->{output_dir}/".$prefix."integration_site_donor_host.bam",
                             'microbiome_donor' => "$self->{output_dir}/".$prefix."microbiome.bam",
+                            'output_dir' => '/dir/for/output.bams',
             $object->{counts}->{lgt}
             $object->{counts}->{microbiome}
 
@@ -832,6 +854,7 @@ sub _bwaPostProcessDonorPaired {
 
     my @donor_fh;
     my @donor_head;
+    my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
 
     $self->{samtools_bin} = $self->{samtools_bin} ? $self->{samtools_bin} : 'samtools';
     my $samtools = $self->{samtools_bin};
@@ -853,8 +876,8 @@ sub _bwaPostProcessDonorPaired {
     } @{ $config->{donor_bams} };
 
     my $class_to_file_name = {
-        'lgt_donor'        => "$self->{output_dir}/" . $prefix . "lgt_donor.bam",
-        'microbiome_donor' => "$self->{output_dir}/" . $prefix . "microbiome.bam"
+        'lgt_donor'        => "$output_dir/" . $prefix . "lgt_donor.bam",
+        'microbiome_donor' => "$output_dir/" . $prefix . "microbiome.bam"
     };
 
     # Check if these files exist already. If they do we'll skip regenerating them.
@@ -892,9 +915,9 @@ sub _bwaPostProcessDonorPaired {
     }
 
     # Here are a bunch of file handles we'll use later.
-    open( my $lgtd, "| $samtools view -S -b -o $self->{output_dir}/" . $prefix . "lgt_donor.bam -" )
+    open( my $lgtd, "| $samtools view -S -b -o $output_dir/" . $prefix . "lgt_donor.bam -" )
         or die "Unable to open\n";
-    open( my $microbiome_donor, "| $samtools view -S -b -o $self->{output_dir}/" . $prefix . "microbiome.bam -" )
+    open( my $microbiome_donor, "| $samtools view -S -b -o $output_dir/" . $prefix . "microbiome.bam -" )
         or die "Unable to open\n";
 
     my $class_to_file = {
@@ -982,8 +1005,8 @@ sub _bwaPostProcessDonorHostPaired {
     my ( $self, $config ) = @_;
 
     $self->{samtools_bin} = $self->{samtools_bin} ? $self->{samtools_bin} : 'samtools';
-    my $samtools = $self->{samtools_bin};
-    $self->{output_dir} = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    my $samtools     = $self->{samtools_bin};
+    my $output_dir   = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     my $classes_each = {
         'MM' => 'paired',
         'UM' => 'single',
@@ -1014,11 +1037,11 @@ sub _bwaPostProcessDonorHostPaired {
     my $prefix = $config->{output_prefix} ? "$config->{output_prefix}_" : '';
 
     my $class_to_file_name = {
-        'lgt_donor'                    => "$self->{output_dir}/" . $prefix . "lgt_donor.bam",
-        'lgt_host'                     => "$self->{output_dir}/" . $prefix . "lgt_host.bam",
-        'integration_site_donor_donor' => "$self->{output_dir}/" . $prefix . "integration_site_donor_donor.bam",
-        'integration_site_donor_host'  => "$self->{output_dir}/" . $prefix . "integration_site_donor_host.bam",
-        'microbiome_donor'             => "$self->{output_dir}/" . $prefix . "microbiome.bam",
+        'lgt_donor'                    => "$output_dir/" . $prefix . "lgt_donor.bam",
+        'lgt_host'                     => "$output_dir/" . $prefix . "lgt_host.bam",
+        'integration_site_donor_donor' => "$output_dir/" . $prefix . "integration_site_donor_donor.bam",
+        'integration_site_donor_host'  => "$output_dir/" . $prefix . "integration_site_donor_host.bam",
+        'microbiome_donor'             => "$output_dir/" . $prefix . "microbiome.bam",
     };
 
     # Check if these files exist already. If they do we'll skip regenerating them.
@@ -1065,16 +1088,16 @@ sub _bwaPostProcessDonorHostPaired {
     }
 
     # Here are a bunch of file handles we'll use later.
-    if ( $self->{verbose} ) { print STDERR "$self->{output_dir}/" . $prefix . "lgt_donor.bam\n"; }
-    open( my $lgtd, "| $samtools view -S -b -o $self->{output_dir}/" . $prefix . "lgt_donor.bam -" )
+    if ( $self->{verbose} ) { print STDERR "$output_dir/" . $prefix . "lgt_donor.bam\n"; }
+    open( my $lgtd, "| $samtools view -S -b -o $output_dir/" . $prefix . "lgt_donor.bam -" )
         or die "Unable to open\n";
-    open( my $lgth, "| $samtools view -S -b -o $self->{output_dir}/" . $prefix . "lgt_host.bam -" )
+    open( my $lgth, "| $samtools view -S -b -o $output_dir/" . $prefix . "lgt_host.bam -" )
         or die "Unable to open\n";
-    open( my $int_site_donor_d, "| $samtools view -S -b -o $self->{output_dir}/" . $prefix . "integration_site_donor_donor.bam -" )
+    open( my $int_site_donor_d, "| $samtools view -S -b -o $output_dir/" . $prefix . "integration_site_donor_donor.bam -" )
         or die "Unable to open\n";
-    open( my $int_site_donor_h, "| $samtools view -S -b -o $self->{output_dir}/" . $prefix . "integration_site_donor_host.bam -" )
+    open( my $int_site_donor_h, "| $samtools view -S -b -o $output_dir/" . $prefix . "integration_site_donor_host.bam -" )
         or die "Unable to open\n";
-    open( my $microbiome_donor, "| $samtools view -S -b -o $self->{output_dir}/" . $prefix . "microbiome.bam -" )
+    open( my $microbiome_donor, "| $samtools view -S -b -o $output_dir/" . $prefix . "microbiome.bam -" )
         or die "Unable to open\n";
 
     my $class_to_file = {
@@ -1556,6 +1579,9 @@ sub splitBam {
         my @fields = split( /\t/, $line );
         my $flag = $self->_parseFlag( $fields[1] );
 
+        # Increment the counter
+        $i++;
+
         # Strip out the XA tag
         $line =~ s/\s+XA:Z:\S+//;
 
@@ -1579,15 +1605,22 @@ sub splitBam {
 
             # Reset the counter
             $i = 0;
+            next;
         }
 
         # If we haven't filled the current file yet just keep printing.
         print $ofh $line;
 
-        # Increment the counter
-        $i++;
     }
     close $ofh;
+
+    ## Check to make sure the last file isn't empty.
+    if ( $self->empty_chk( { input => $ofile } ) == 1 ) {
+        $self->_run_cmd("rm $ofile");
+        my $remove_empty_bam = pop(@outfiles);
+        $count--;
+    }
+
     if ( $self->{verbose} ) {
         print STDERR "Split $config->{input} into $count bams, each with $seqs_per_file sequences per bam.\n";
     }
@@ -1616,17 +1649,18 @@ sub _parseFlag {
     my $bin = sprintf( "%011d", $rev );
     my $final_bin = reverse $bin;
     return {
-        'paired'    => substr( $final_bin, 0,  1 ),
-        'proper'    => substr( $final_bin, 1,  1 ),
-        'qunmapped' => substr( $final_bin, 2,  1 ),
-        'munmapped' => substr( $final_bin, 3,  1 ),
-        'qrev'      => substr( $final_bin, 4,  1 ),
-        'mrev'      => substr( $final_bin, 5,  1 ),
-        'first'     => substr( $final_bin, 6,  1 ),
-        'last'      => substr( $final_bin, 7,  1 ),
-        'secondary' => substr( $final_bin, 8,  1 ),
-        'failqual'  => substr( $final_bin, 9,  1 ),
-        'pcrdup'    => substr( $final_bin, 10, 1 )
+        'paired'        => substr( $final_bin, 0,  1 ),
+        'proper'        => substr( $final_bin, 1,  1 ),
+        'qunmapped'     => substr( $final_bin, 2,  1 ),
+        'munmapped'     => substr( $final_bin, 3,  1 ),
+        'qrev'          => substr( $final_bin, 4,  1 ),
+        'mrev'          => substr( $final_bin, 5,  1 ),
+        'first'         => substr( $final_bin, 6,  1 ),
+        'last'          => substr( $final_bin, 7,  1 ),
+        'secondary'     => substr( $final_bin, 8,  1 ),
+        'failqual'      => substr( $final_bin, 9,  1 ),
+        'pcrdup'        => substr( $final_bin, 10, 1 ),
+        'supplementary' => substr( $final_bin, 11, 1 ),
     };
 }
 
@@ -1759,16 +1793,18 @@ sub prelim_filter {
     $self->_run_cmd("mkdir -p $output_dir");
 
     my $keep_softclip   = defined $config->{keep_softclip}   ? $config->{keep_softclip}   : $self->{keep_softclip};
+    my $softclip_min    = defined $config->{softclip_min}    ? $config->{softclip_min}    : $self->{softclip_min};
     my $overwrite       = defined $config->{overwrite}       ? $config->{overwrite}       : $self->{overwrite};
     my $split_bam       = defined $config->{split_bam}       ? $config->{split_bam}       : $self->{split_bam};
     my $prelim_filter   = defined $config->{prelim_filter}   ? $config->{prelim_filter}   : $self->{prelim_filter};
     my $seqs_per_file   = $config->{seqs_per_file}           ? $config->{seqs_per_file}   : $self->{seqs_per_file};
     my $name_sort_input = defined $config->{name_sort_input} ? $config->{name_sort_input} : $self->{name_sort_input};
+    my $name_sort_check = defined $config->{name_sort_check} ? $config->{name_sort_check} : $name_sort_input;
     if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Start ========\n"; }
     my ( $fn, $path, $suffix ) = fileparse( $input, ( '.srt.bam', '.bam' ) );
     my $header = $self->_run_cmd("samtools view -H $input");
     my @output_list;    ## Array of output bams to return
-   
+
     ## Check if the output exists already
     ## $output isn't set right at this point in the scrip to check if the final output already exist. FIX later.
     my $files_exist = 0;
@@ -1780,7 +1816,7 @@ sub prelim_filter {
         chomp( my @output_list = `find $output_dir -name '$fn\*_prelim.bam'` );
         return \@output_list;
     }
-   
+
     ## Check we dont' have the name-sorted.bam already
     my $sorted_bam = "$output_dir$fn\_name-sorted.bam";
     if ( -e "$sorted_bam" ) { $files_exist = 1; }
@@ -1804,37 +1840,46 @@ sub prelim_filter {
         $sorted_bam = $input;
     }
 
-    ## (2). QUICK Check to make sure the reads are PE and name sorted properly.
-    if ( $self->{verbose} ) { print STDERR "======== &prelim_filter 2x Check PE & name sort: Start ========\n"; $self->time_check; }
-    open( my $chk, "samtools view $sorted_bam | head |" ) or $self->fail("*** Error *** &prelim_filter can't open the name-sorted-input.bam: $sorted_bam\n");
-    my %dbl_chk_hash;
-    while (<$chk>) {
-        chomp;
-        my @line = split;
-        my $read = $line[0];
-        $read =~ s/(\/\d{1})$//;
-        $dbl_chk_hash{$read}++;
-    }
-    close $chk;
-
-    my $die_count = 0;
-    foreach my $reads ( keys %dbl_chk_hash ) {
-        if ( $dbl_chk_hash{$reads} != 2 ) {
-            $die_count++;
-            print STDERR "*** Warning *** This read is missing the mate: $reads \n";
+    ## (2). QUICK/dirty Check to make sure the reads are PE and name sorted properly.
+    if ( $self->{name_sort_check} == 1 ) {
+        if ( $self->{verbose} ) { print STDERR "======== &prelim_filter 2x Check PE & name sort: Start ========\n"; $self->time_check; }
+        open( my $chk, "samtools view $sorted_bam | head |" ) or $self->fail("*** Error *** &prelim_filter can't open the name-sorted-input.bam: $sorted_bam\n");
+        my %dbl_chk_hash;
+        while (<$chk>) {
+            chomp;
+            my @line = split;
+            my $read = $line[0];
+            $read =~ s/(\/\d{1})$//;
+            $dbl_chk_hash{$read}++;
         }
-    }
+        close $chk;
 
-    if ( $die_count >= 2 ) {
-        die "*** Error *** This bam is missing atleast 2 PE mate-pairs in the first 10 reads. It is highly likely this bam isn't PE or name sorted properly. Please fix this and try again.\n";
+        my $die_count = 0;
+        foreach my $reads ( keys %dbl_chk_hash ) {
+            if ( $dbl_chk_hash{$reads} != 2 ) {
+                $die_count++;
+                print STDERR "*** Warning *** This read is missing the mate: $reads \n";
+            }
+        }
+
+        if ( $die_count >= 2 ) {
+            die "*** Error *** This bam is missing atleast 2 PE mate-pairs in the first 10 reads. It is highly likely this bam isn't PE or name sorted properly. 
+            Please manually inspect this bam: $sorted_bam . If the bam is correct, relaunch prelim_filter with --name_sort_check=0.\n";
+        }
     }
     if ( $self->{verbose} ) { print STDERR "======== &prelim_filter 2x Check PE & name sort:: Finished ========\n"; $self->time_check; }
 
     ## (3). Prelim filtering.
-    my $more_lines     = 1;
-    my $num_pass       = 0;
-    my $num_null       = 0;
-    my $num_singletons = 0;
+    my $more_lines        = 1;
+    my $num_pass          = 0;
+    my $num_null          = 0;
+    my $num_singletons    = 0;
+    my $num_secondary     = 0;
+    my $num_supplementary = 0;
+    my $MM                = 0;
+    my $MU                = 0;
+    my $UU                = 0;
+
     if ( $prelim_filter == 1 ) {
         if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Filter Start ========\n"; }
         ## Setup and open output
@@ -1891,16 +1936,27 @@ sub prelim_filter {
             ## Convert sam flag into usable data
             my $converted_flag1 = $self->_parseFlag($flag1);
             my $converted_flag2 = $self->_parseFlag($flag2);
-            ## FILTER OUT seconday aln reads
-            next if ( $converted_flag1->{'secondary'} || $converted_flag2->{'secondary'} );
 
-            ## FILTER FOR reads that are UM (M_UM,UM_M,UM_UM)
-            if ( $converted_flag1->{'qunmapped'} || $converted_flag1->{'munmapped'} ) { $print = 1; }
+            ## Count number of read types
+            if ( !$converted_flag1->{'qunmapped'} && !$converted_flag2->{'qunmapped'} ) { $MM += 2; }    ## M_M
+
+            ## FILTER OUT seconday aln reads
+            if ( $converted_flag1->{'secondary'} || $converted_flag2->{'secondary'} ) { $num_secondary++; next; }
+
+#if ( $converted_flag1->{'supplementary'} || $converted_flag2->{'supplementary'} ) { $num_supplementary++; next; }  # I don't want to implement this until I know for sure what the "supplementary" would look like in the .bam
+
+            ## FILTER FOR reads that are UM (M_UM,UM_M,UU)
+            if ( $converted_flag1->{'qunmapped'} || $converted_flag2->{'qunmapped'} ) {
+                $print = 1;
+                if ( $converted_flag1->{'qunmapped'}  && !$converted_flag1->{'munmapped'} ) { $MU += 2; }    ## U_M
+                if ( !$converted_flag1->{'qunmapped'} && $converted_flag1->{'munmapped'} )  { $MU += 2; }    ## M_U
+                if ( $converted_flag1->{'qunmapped'}  && $converted_flag2->{'qunmapped'} )  { $UU += 2; }    ## U_U
+            }
+
             ## FILTER FOR soft clipped reads
             if ( $keep_softclip == 1 ) {
                 map {
-                    if ( $_ =~ /(\d+)M(\d+)S/ && $2 >= 24 ) { $print = 1; }
-                    if ( $_ =~ /(\d+)S(\d+)M/ && $1 >= 24 ) { $print = 1; }
+                    if ( $_ =~ /(\d+)S/ && $1 >= $softclip_min ) { $print = 1; }                             ## 10.21.14 Testing more liberal softclip parsing
                 } ( $cigar1, $cigar2 );
             }
             if ( $print == 1 ) {
@@ -1914,8 +1970,8 @@ sub prelim_filter {
                 } ( $read1, $read2 );
 
                 #  print $out "$read1$read2"; ## 07.15.14 This code was working but I am trying to sub out \1 && \2 in code above
-                $i += 2;
-                $num_pass++;
+                $i        += 2;
+                $num_pass += 2;
             }
         }
         close $out;    ## or $self->fail("Can't close out: $output because: $!\n");
@@ -1934,9 +1990,8 @@ sub prelim_filter {
 
     my @sort_out_list = sort @output_list;
     if ( $self->{verbose} ) {
-        print STDERR "======== &prelim_filter: Singletons:$num_singletons ==\n";
-        print STDERR "======== &prelim_filter: Null:$num_null ==\n";
-        print STDERR "======== &prelim_filter: Pass:$num_pass ==\n";
+        print STDERR "======== &prelim_filter: MM:$MM | Bad Singletons:$num_singletons | Null:$num_null | Secondary:$num_secondary | Supplementary:$num_supplementary ==\n";
+        print STDERR "======== &prelim_filter: Pass:$num_pass | MU:$MU | UU:$UU ==\n";
         print STDERR "======== &prelim_filter: Finished ========\n";
     }
     return \@sort_out_list;
@@ -2168,10 +2223,12 @@ sub new2 {
 
     # Usefull list for fileparse: @{$lgtseek->{'list'}}
     my $self = {
-        bam_suffix_list =>
-            [ '_resorted.\d+.bam', '_resorted\.bam', '\.gpg\.bam', '_prelim\.bam', '_name-sort\.bam', '_pos-sort\.bam', '_psort\.bam', '.psort.bam', '_nsort\.bam', '\.srt\.bam', '\.bam' ],
+        bam_suffix_list => [
+            '_resorted.\d+.bam', '_resorted\.bam', '\.gpg\.bam', '_prelim\.bam',  '_name-sort\.bam', '_pos-sort\.bam', '_psort\.bam', '-psort\.bam',
+            '.psort.bam',        '_nsort\.bam',    '\.srt\.bam', '\.sorted\.bam', '\.bam'
+        ],
         sam_suffix_list   => [ '.sam.gz',         '.sam' ],
-        fastq_suffix_list => [ '_\d+\.fastq\.gz', '\.fastq\.gz', '_\d+\.fastq', '\.fastq', '\.fq' ],
+        fastq_suffix_list => [ '_\d+\.fastq\.gz', '\.fastq\.gz', '_\d+\.fastq', '_\d+\.fq', '\.fastq', '\.fq' ],
         fasta_suffix_list   => [ '.fa.gz',   '.fasta.gz',     '.fasta', '.fa' ],
         mpileup_suffix_list => [ '.mpileup', '_COVERAGE.txt', '.txt' ],
         suffix_regex        => qr/\.[^\.]+/,

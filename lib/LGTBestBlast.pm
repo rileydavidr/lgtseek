@@ -86,11 +86,11 @@ sub filterBlast {
         $input = $args->{blast};
     }
 
-    if(!$input) {die "Need to provide a fasta or a blast file for blast\n";}
+    if(!$input) {confess "Need to provide a fasta or a blast file for blast\n";}
 
     # Initialize gi2taxon db. 
     $gi2tax = $args->{gitaxon};
-    if(!$gi2tax) {die "Need to provide a gitaxon object\n";}
+    if(!$gi2tax) {confess "Need to provide a gitaxon object\n";}
 
 
     # Get the basename of the input file.
@@ -102,7 +102,7 @@ sub filterBlast {
         $overallfile = $args->{output_dir}."/$name\_overall.out";
         # print STDERR "Printing to $overallfile\n";
     }    
-    open $out3, ">$overallfile" or die "Unable to open overall output $overallfile\n";
+    open $out3, ">$overallfile" or confess "Unable to open overall output $overallfile\n";
 
     my $trace_mapping_file = $args->{trace_mapping};
     
@@ -115,18 +115,18 @@ sub filterBlast {
     my $fh;
     if($args->{blast}) {
         print STDERR "Opening blast input.\n";
-        open($fh, "<$input") or die "Unable to open $input\n";
+        open($fh, "<$input") or confess "Unable to open $input\n";
     }
     elsif(!$args->{blast}) {
         open($fh, "-|", "$args->{blast_bin} -a $args->{threads} -d $args->{db} -m8 -i $input") 
-            or die "Unable to run: $args->{blast_bin} on: $input with db: $args->{db}\n";
+            or confess "Unable to run: $args->{blast_bin} on: $input with db: $args->{db}\n";
     }
 
     &_process_file($fh);
     my $list = &_create_list_of_outputs($args);
 
 	foreach my $lineage (@$lineages){
-		close $lineage->{handle} or die "=== &LGTBestBlast - Can't close output filehandle because: $! ===\n";
+		close $lineage->{handle}; ##  or confess "=== &LGTBestBlast - Can't close output filehandle because: $! ===\n";
 	}
 
     return {
@@ -145,7 +145,7 @@ sub _read_map_file {
     
     if($map_file) {
         print STDERR "Reading the map file\n";
-        open MAP, "<$map_file" or die "Unable to open $map_file\n";
+        open MAP, "<$map_file" or confess "Unable to open $map_file\n";
         while(<MAP>) {
             my @fields = split;
             $trace_lookup->{$fields[0]} = 
@@ -176,13 +176,13 @@ sub _init_lineages {
     	if(!$args->{output1} && $args->{output_dir}) {
         	$out1file = $args->{output_dir}."/$name\_lineage1.out";
     	}
-    	open my $out1, ">$out1file" or die "Unable to open lineage1 output $out1file\n";
+    	open my $out1, ">$out1file" or confess "Unable to open lineage1 output $out1file\n";
 
     	$out2file = $args->{output2};
     	if(!$args->{output1} && $args->{output_dir}) {
         	$out2file = $args->{output_dir}."/$name\_lineage2.out";
     	}
-    	open my $out2, ">$out2file" or die "Unable to open lineage2 output $out2file\n";
+    	open my $out2, ">$out2file" or confess "Unable to open lineage2 output $out2file\n";
 
     	push(@$lineages,(
     		{'lineage' => $args->{lineage1},
@@ -485,10 +485,10 @@ sub _create_list_of_outputs {
    		($name,$directories,$suffix) = fileparse($config->{blast},qr/\.[^.]*/); 
    		$out_dir = defined $config->{output_dir} ? $config->{output_dir} : $directories;
    	} else {
-   		if(!$config->{output_dir}){die "Must pass &BestBlast2 an output_dir. $!\n";}
+   		if(!$config->{output_dir}){confess "Must pass &BestBlast2 an output_dir. $!\n";}
    		$out_dir = $config->{output_dir};
    	}
-   	open OUT, ">$out_dir/$name\_filtered_blast.list" or die "Unable to open $out_dir/$name\_filtered_blast.list\n";
+   	open OUT, ">$out_dir/$name\_filtered_blast.list" or confess "Unable to open $out_dir/$name\_filtered_blast.list\n";
    	print OUT "$overallfile\n";
    	print OUT "$out1file\n";
    	print OUT "$out2file\n";
