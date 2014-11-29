@@ -398,7 +398,7 @@ sub _find_lgt_in_clone {
                 my $fhit = $traces_by_template->{$clone}->{forward}->{hit};
                 my $nft = scalar keys %{$traces_by_template->{$clone}->{forward}->{traces}};
                 push(@$fwd_traces, join("\t",($fhit->{trace_id},$fhit->{evalue},$fhit->{align_len},$fhit->{lca},$fhit->{hit_filter})));
-                my @Ffields = ($clone,'F',$nft,$forward,join(",",@$fwd_traces));		## KBS added F to fields to delineate between this and the next @fields
+                my @Ffields = ($clone,'F',$nft,$forward,join(",",@$fwd_traces));	
                 if($options->{append_links}) {
                     push(@Ffields,("driley-lx:8080/blast/$clone\_F.html","http://www.ncbi.nlm.nih.gov/Traces/trace.cgi?&cmd=retrieve&val=TEMPLATE_ID%20%3D%20%22".$clone."%22%20and%20SPECIES_CODE%20%3D%20%22HOMO%20SAPIENS%22%20and%20TRACE_END%20%3D%20%22FORWARD%22&dopt=trace&size=2&dispmax=5&seeas=Show"));
                 }
@@ -406,7 +406,7 @@ sub _find_lgt_in_clone {
                 my $rhit = $traces_by_template->{$clone}->{reverse}->{hit};
                 my $nrt = scalar keys %{$traces_by_template->{$clone}->{forward}->{traces}};
                 push(@$rev_traces, join("\t",($rhit->{trace_id},$rhit->{evalue},$rhit->{align_len},$rhit->{lca},$rhit->{hit_filter})));
-                my @Rfields = ($clone,'R',$nft,$reverse,join(",",@$rev_traces));			## KBS added R to fields to delineate between this and previous @fields
+                my @Rfields = ($clone,'R',$nft,$reverse,join(",",@$rev_traces));	
                 if($options->{append_links}) {
                     push(@Rfields,("driley-lx:8080/blast/$clone\_R.html","http://www.ncbi.nlm.nih.gov/Traces/trace.cgi?&cmd=retrieve&val=TEMPLATE_ID%20%3D%20%22".$clone."%22%20and%20SPECIES_CODE%20%3D%20%22HOMO%20SAPIENS%22%20and%20TRACE_END%20%3D%20%22REVERSE%22&dopt=trace&size=2&dispmax=5&seeas=Show"));
                 }

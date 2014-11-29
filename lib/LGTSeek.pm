@@ -52,7 +52,10 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
-## use warnings;
+our $VERSION = '1.00';
+use warnings;
+no warnings 'misc';
+no warnings 'uninitialized';
 use strict;
 use version;
 use Carp;
@@ -60,6 +63,7 @@ $Carp::MaxArgLen = 0;
 use File::Basename;
 
 # Dependencies
+use Data::Dumper;
 use GiTaxon;
 use LGTBestBlast;
 use LGTFinder;
@@ -145,13 +149,15 @@ sub getGiTaxon {
 
  Title   : prinseqFilterBam
  Usage   : my $filteredBam = $LGTSeek->prinseqFilterBam({'input_bam' => '/path/to/file.bam'...})
- Function: Prinseq filter a bam file
+ Function: Prinseq filter a bam file.
  Returns : A Hash $ref->{bam} = path to the filtered bam. $ref->{count} = # of reads passing filtering.
  Args    : 
         input_bam    => /path/to/file.bam
         output_dir   => /path/for/output.bam
         overwrite    => <0|1> [0] 1= Overwrite output if it is found already. 
         prinseq_bin  =>
+        Picard_jar   => 
+        java_opts    => 
         samtools_bin =>
         ergatis_bin  =>
         bin_dir      =>
@@ -166,8 +172,11 @@ sub prinseqFilterBam {
     if ( $self->{verbose} ) { print STDERR "======== &prinseqFilterBam: Start ========\n"; }
 
     # Override if it is provided
-    $self->{prinseq_bin}  = $config->{prinseq_bin}          ? $config->{prinseq_bin}  : $self->{prinseq_bin};
-    $self->{samtools_bin} = $self->{samtools_bin}           ? $self->{samtools_bin}   : 'samtools';
+    $self->{prinseq_bin}  = defined $config->{prinseq_bin}  ? $config->{prinseq_bin}  : $self->{prinseq_bin};
+    $self->{Picard_jar}   = defined $config->{Picard_jar}   ? $config->{Picard_jar}   : $self->{Picard_jar};
+    $self->{java_opts}    = defined $config->{java_opts}    ? $config->{java_opts}    : $self->{java_opts};
+    $self->{java_bin}     = defined $config->{java_bin}     ? $config->{java_bin}     : "java";
+    $self->{samtools_bin} = defined $self->{samtools_bin}   ? $self->{samtools_bin}   : 'samtools';
     $self->{dedup}        = defined $config->{dedup}        ? $config->{dedup}        : $self->{dedup};
     $self->{rm_low_cmplx} = defined $config->{rm_low_cmplx} ? $config->{rm_low_cmplx} : $self->{rm_low_cmplx};
 
@@ -209,7 +218,7 @@ sub _prinseqFilterPaired {
 
     $output_dir = $output_dir ? $output_dir : $path;
 
-    my $tmp_dir = "$output_dir/tmp/";
+    my $tmp_dir = ( $output_dir =~ /^\.\/$/ ) ? "./tmp" : "$output_dir/tmp";
 
     $self->_run_cmd("mkdir -p $output_dir");
     $self->_run_cmd("mkdir -p $tmp_dir");
@@ -217,63 +226,57 @@ sub _prinseqFilterPaired {
     my $bin          = $self->{bin_dir};
     my $prinseq_bin  = $self->{prinseq_bin};
     my $samtools     = $self->{samtools_bin};
+    my $Picard       = "$self->{java_bin} \-$self->{java_opts} -jar $self->{Picard_jar}";
     my $dedup        = defined $self->{dedup} ? $self->{dedup} : "1";
     my $rm_low_cmplx = defined $self->{rm_low_cmplx} ? $self->{rm_low_cmplx} : "1";
     my $cmd;
+    my $filtered;
 
     if ( -e "$output_dir/$name\_bad_ids.out" && $overwrite == 0 ) {
         if ( $self->{verbose} ) {
             print STDERR "Already found the output for &prinseqFilter: $output_dir/$name\_bad_ids.out";
         }
-        my $filtered = $self->filter_bam_by_ids(
-            {   input_bam => $bam_file,
-                bad_list  => "$output_dir/$name\_bad_ids.out",
+        $filtered = $self->filter_bam_by_ids(
+            {   input_bam      => $bam_file,
+                header_comment => "\@CO\tID:PrinSeq-filtered\tPG:LGTseek\tVN:$VERSION",
+                bad_list       => "$output_dir/$name\_bad_ids.out",
             }
         );
         return $filtered;
     }
     else {
 
-        # Generate concatenated fastq files for prinseq derep filtering
-        ## Need to incorporate sam2fasta.pm KBS 01.07.14
+        # Generate concatenated fastq files for prinseq derep filtering  ## Need to incorporate sam2fasta.pm KBS 01.07.14
         if ( $dedup == 1 ) {
             if ( $self->{verbose} ) { print STDERR "======== Deduplication Filtering========\n"; }
-            $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=1 --output_file=$tmp_dir/$name\_combined.fastq";
-
-            # print STDERR "$cmd\n";
-            $self->_run_cmd($cmd);
-
-            # Run prinseq for dereplication
-            $cmd = "perl $prinseq_bin --fastq=$tmp_dir/$name\_combined.fastq --out_good=$tmp_dir/$name\_derep_good --out_bad=$tmp_dir/$name\_derep_bad -derep 14";
-
-            # print STDERR "$cmd\n";
-            $self->_run_cmd($cmd);
-
-            # Pull out bad ids
-            if ( $self->{verbose} ) { print STDERR "======== Pull DeDup Bad ID's ========\n"; }
-            $cmd = "perl -e 'while(<>){s/\@//;print;<>;<>;<>;}' $tmp_dir/$name\_derep_bad.fastq > $tmp_dir/$name\_derep_bad_ids.out";
-
-            # print STDERR "$cmd\n";
-            $self->_run_cmd($cmd);
+            $self->_run_cmd("$self->{samtools_bin} sort -m $self->{sort_mem} -@ $self->{threads} $bam_file $tmp_dir/$name\.psrt");
+            $self->_run_cmd("$Picard FixMateInformation I=$tmp_dir/$name\.psrt.bam");
+            $self->_run_cmd(
+                "$Picard MarkDuplicates INPUT=$tmp_dir/$name\.psrt.bam OUTPUT=$tmp_dir/$name\_dedup.bam METRICS_FILE=$tmp_dir/$name\_dedup-metrics.txt ASSUME_SORTED=true REMOVE_DUPLICATES=false");
+            open( my $BAM, "samtools view $tmp_dir/$name\_dedup.bam |" ) or $self->fail("*** Error *** &prinseqFilterBam unable to open the deduped bam: $tmp_dir/$name\_dedup.bam");
+            open( my $BADS, "> $tmp_dir/$name\_derep_bad_ids.out" ) or $self->fail("*** Error *** &prinseqFilterBam unable to open output file for dedup bad ids: $tmp_dir/$name\_derep_bad_ids.out");
+            while ( my $bam_line = $self->_read_bam_line($BAM) ) {
+                if ( $bam_line->{flag}->{pcrdup} ) { print $BADS "$bam_line->{id}\n"; }
+            }
+            close $BAM;
+            close $BADS;
             $self->time_check;
         }
+
         if ( $rm_low_cmplx == 1 ) {
 
             # Generate single-read fastq for low complexity filtering
             if ( $self->{verbose} ) { print STDERR "======== Low Complexity Filter ========\n"; }
-            $cmd = "perl $bin/sam2fasta.pl --samtools_bin=$self->{samtools_bin} --input=$bam_file --fastq=1 --combine_mates=0 --paired=1 --output_file=$tmp_dir/$name.fastq";
-            $self->_run_cmd($cmd);
+            $self->_run_cmd("$Picard SamToFastq INPUT=$bam_file FASTQ=$tmp_dir/$name\_1.fastq SECOND_END_FASTQ=$tmp_dir/$name\_2.fastq");
 
             # Run prinseq for low complexity filtering
-            $cmd = "perl $prinseq_bin --fastq=$tmp_dir/$name\_1.fastq --out_good=$tmp_dir/$name\_lc_1_good --out_bad=$tmp_dir/$name\_lc_1_bad -lc_method dust -lc_threshold 7";
-            $self->_run_cmd($cmd);
+            $self->_run_cmd("perl $prinseq_bin --fastq=$tmp_dir/$name\_1.fastq --out_good null --out_bad=$tmp_dir/$name\_lc_1_bad -lc_method dust -lc_threshold 7");
 
             if ( -e "$tmp_dir/$name\_lc_1_bad.fastq" ) {
 
                 # Pull out bad ids
                 if ( $self->{verbose} ) { print STDERR "======== Pull Low-Cmplx-1 Bad ID's ========\n"; }
-                my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_1_bad.fastq > $tmp_dir/$name\_lc_1_bad_ids.out";
-                $self->_run_cmd($cmd);
+                $self->_run_cmd("perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_1_bad.fastq > $tmp_dir/$name\_lc_1_bad_ids.out");
             }
             else {
                 if ( $self->{verbose} ) { print STDERR "Didn't find any low complexity sequences in read 1\n"; }
@@ -281,14 +284,12 @@ sub _prinseqFilterPaired {
             }
 
             # Run prinseq for low complexity filtering
-            $cmd = "perl $prinseq_bin --fastq=$tmp_dir/$name\_2.fastq --out_good=$tmp_dir/$name\_lc_2_good --out_bad=$tmp_dir/$name\_lc_2_bad -lc_method dust -lc_threshold 7";
-            $self->_run_cmd($cmd);
+            $self->_run_cmd("perl $prinseq_bin --fastq=$tmp_dir/$name\_2.fastq --out_good null --out_bad=$tmp_dir/$name\_lc_2_bad -lc_method dust -lc_threshold 7");
 
             # Pull out bad ids
             if ( -e "$tmp_dir/$name\_lc_2_bad.fastq" ) {
                 if ( $self->{verbose} ) { print STDERR "======== Pull Low-Cmplx-2 Bad ID's ========\n"; }
-                my $cmd = "perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_2_bad.fastq > $tmp_dir/$name\_lc_2_bad_ids.out";
-                $self->_run_cmd($cmd);
+                $self->_run_cmd("perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_2_bad.fastq > $tmp_dir/$name\_lc_2_bad_ids.out");
             }
             else {
                 if ( $self->{verbose} ) { print STDERR "Didn't find any low complexity sequences in read 2\n"; }
@@ -299,23 +300,23 @@ sub _prinseqFilterPaired {
 
         # Merge bad ids from derep and lc filtering
         $cmd = "cat";
-        if ( $dedup == 1 ) { $cmd = $cmd . " $tmp_dir/$name\_derep_bad_ids.out"; }
-        if ( $rm_low_cmplx == 1 ) { $cmd . " $tmp_dir/$name\_lc_1_bad_ids.out $tmp_dir/$name\_lc_2_bad_ids.out"; }
-        $cmd = $cmd . " | sort -u > $output_dir/$name\_prinseq-bad-ids.out";
-        ## $cmd = "cat $tmp_dir/$name\_derep_bad_ids.out $tmp_dir/$name\_lc_1_bad_ids.out $tmp_dir/$name\_lc_2_bad_ids.out | sort -u > $output_dir/$name\_prinseq-bad-ids.out";
+        if ( $dedup == 1 )        { $cmd = $cmd . " $tmp_dir/$name\_derep_bad_ids.out"; }
+        if ( $rm_low_cmplx == 1 ) { $cmd = $cmd . " $tmp_dir/$name\_lc_1_bad_ids.out $tmp_dir/$name\_lc_2_bad_ids.out"; }
+        $cmd = $cmd . " | sort -u > $tmp_dir/$name\_prinseq-bad-ids.out";
         $self->_run_cmd($cmd);
 
-        # Filter bam file to remove bad ids
-
-        my $filtered = $self->filter_bam_by_ids(
-            {   input_bam  => $bam_file,
-                output_dir => $output_dir,
-                bad_list   => "$output_dir/$name\_prinseq-bad-ids.out",
+        # Finally, filter based on dedup & lc bad ids
+        $filtered = $self->filter_bam_by_ids(
+            {   input_bam      => $bam_file,
+                output_dir     => $output_dir,
+                header_comment => "\@CO\tID:PrinSeq-filtered\tPG:LGTseek\tVN:$VERSION",
+                bad_list       => "$tmp_dir/$name\_prinseq-bad-ids.out",
             }
         );
 
         # Cleanup /tmp/ folder w/ intermediate files
         $self->_run_cmd("rm -rf $tmp_dir");
+
         $self->time_check;
         return $filtered;
     }
@@ -589,6 +590,7 @@ sub downloadCGHub {
     # Check for all the genetorrent related options
     my $output_dir         = $config->{output_dir}       ? $config->{output_dir}       : $self->{output_dir};
     my $genetorrent_path   = $config->{genetorrent_path} ? $config->{genetorrent_path} : $self->{genetorrent_path};    ## Defaults to lgtseq.conf
+    my $python             = $self->{'python_2_7_path'}  ? $self->{'python_2_7_path'}  : "python";
     my $cghub_key          = $config->{cghub_key}        ? $config->{cghub_key}        : $self->{cghub_key};
     my $retry_attempts_max = $config->{retry_attempts}   ? $config->{retry_attempts}   : $self->{retry_attempts};      ## Defaults to lgtseq.conf
     my $max_children       = $config->{threads}          ? $config->{threads}          : $self->{threads};             ## Defaults to lgtseq.conf
@@ -615,14 +617,14 @@ sub downloadCGHub {
     while ( $retry == 1 && $retry_attempts <= $retry_attempts_max ) {
         ## Download the files
         if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Downloading: analysis_id\=$download . . . ========\n"; }
-        my $cmd_string = "$self->{genetorrent_path}/gtdownload --max-children $max_children -r $rate_limit -p $output_dir -c $cghub_key -d $download";
+        my $cmd_string = "$genetorrent_path\/gtdownload --max-children $max_children -r $rate_limit -p $output_dir -c $cghub_key -d $download";
         $self->_run_cmd($cmd_string);
 
         ## Making  a hash of the bam filename = md5 sum.
         ## This will allow retrying to download if the bam/bai are not finished or correct.
         if ( $config->{analysis_id} ) {
             if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Downloading cgquery.xml file to get md5 numbers.\n"; }
-            my $cmd = "$genetorrent_path\/cgquery \"analysis_id\=$config->{analysis_id}\" -o $output_dir/cgquery.xml";
+            my $cmd = "$python $genetorrent_path\/cgquery \"analysis_id\=$config->{analysis_id}\" -o $output_dir/cgquery.xml";
             if ( $self->{verbose} ) { print STDERR "$cmd\n"; }
             my $cgquery_retry    = 1;
             my $cgquery_attempts = 0;
@@ -740,7 +742,7 @@ sub runBWA {
     };
 
     # Build the command string;
-    my @cmd = ("$self->{ergatis_dir}/lgt_bwa --num_aligns=3 --bwa_path=$self->{bwa_path}");
+    # my @cmd = ("$self->{ergatis_dir}/lgt_bwa --num_aligns=3 --bwa_path=$self->{bwa_path}");
 
     my $suff = '.sam';
     if ( $config->{output_bam} ) {
@@ -1148,15 +1150,47 @@ sub _bwaPostProcessDonorHostPaired {
     map {
         if ( $_ =~ /_donor$/ ) {
             print "Printing header to $_ donor file\n";
-            print { $class_to_file->{$_} } join( '', @donor_head );
+            print { $class_to_file->{$_} } join( '', grep( /^\@SQ/, @donor_head ) );
+            my @pg_headers = grep( /^\@PG|^\@CO/, @donor_head );
+            my %pg_hash;
+            foreach my $pgs (@pg_headers) {
+                chomp($pgs);
+                $pg_hash{$pgs}++;
+            }
+            my $last_pg_id;
+            if ( $donor_head[-1] =~ /^\@PG|^\@CO/ ) {
+                my $last_pg = $donor_head[-1];
+                my $last_pg_id = ( split /\t/, $last_pg )[1];
+                $last_pg_id =~ s/ID\:/PP\:/;
+                $last_pg_id = "\t" . $last_pg_id;
+            }
+            foreach my $pgs ( keys %pg_hash ) {
+                print { $class_to_file->{$_} } "$pgs\n";
+            }
+            print { $class_to_file->{$_} } "\@CO\tID:PostProcess\tPN:LGTseek\tVN:$VERSION$last_pg_id\n";
 
             #            close $class_to_file->{$_};
         }
         elsif ( $_ =~ /_host$/ ) {
             print "Printing header to $_ host file\n";
-            print { $class_to_file->{$_} } join( '', @host_head );
-
-            #            close $class_to_file->{$_};
+            print { $class_to_file->{$_} } join( '', grep( /^\@SQ/, @host_head ) );
+            my @pg_headers = grep( /^\@PG|^\@CO/, @host_head );
+            my %pg_hash;
+            foreach my $pgs (@pg_headers) {
+                chomp($pgs);
+                $pg_hash{$pgs}++;
+            }
+            my $last_pg_id;
+            if ( $host_head[-1] =~ /^\@PG|^\@CO/ ) {
+                my $last_pg = $host_head[-1];
+                my $last_pg_id = ( split /\t/, $last_pg )[1];
+                $last_pg_id =~ s/ID\:/PP\:/;
+                $last_pg_id = "\t" . $last_pg_id;
+            }
+            foreach my $pgs ( keys %pg_hash ) {
+                print { $class_to_file->{$_} } "$pgs\n";
+            }
+            print { $class_to_file->{$_} } "\@CO\tID:PostProcess\tPN:LGTseek\tVN:$VERSION$last_pg_id\n";
         }
     } keys %$class_to_file;
 
@@ -1278,9 +1312,6 @@ sub blast2lca {
         my @fields = split(/\t/);
         my $new_id = $fields[0];
 
-        # if ( $fields[0] =~ /^(.*)(\/\d)*/ ) {
-        #     $new_id = $1;
-        # }
         if ( $config->{evalue_cutoff} ) { $evalue_cutoff = $config->{evalue_cutoff}; }
         next if ( $new_id eq $id && $fields[10] > $evalue_cutoff );
         my $taxon = $gi2tax->getTaxon( $fields[1] );
@@ -1351,8 +1382,8 @@ sub blast2lca {
                 $line2 = <IN>;
                 goto NEXT;
             }
-            my $lca1             = @f1[1];
-            my $lca2             = @f2[1];
+            my $lca1             = $f1[1];
+            my $lca2             = $f2[1];
             my $conservative_lca = &_find_lca( [ $lca1, $lca2 ] );
 
             # Calculate Liberal LCA
@@ -1646,7 +1677,7 @@ sub _parseFlag {
 
         #    print "ERROR $rev $rawbin\n";
     }
-    my $bin = sprintf( "%011d", $rev );
+    my $bin = sprintf( "%012d", $rev );
     my $final_bin = reverse $bin;
     return {
         'paired'        => substr( $final_bin, 0,  1 ),
@@ -1662,6 +1693,26 @@ sub _parseFlag {
         'pcrdup'        => substr( $final_bin, 10, 1 ),
         'supplementary' => substr( $final_bin, 11, 1 ),
     };
+}
+
+sub _create_flag {
+    my ( $self, $data ) = @_;
+
+    my $flag = 0;
+    $flag += $data->{paired} *        ( 2**0 );
+    $flag += $data->{proper} *        ( 2**1 );
+    $flag += $data->{qunmapped} *     ( 2**2 );
+    $flag += $data->{munmapped} *     ( 2**3 );
+    $flag += $data->{qrev} *          ( 2**4 );
+    $flag += $data->{mrev} *          ( 2**5 );
+    $flag += $data->{first} *         ( 2**6 );
+    $flag += $data->{last} *          ( 2**7 );
+    $flag += $data->{secondary} *     ( 2**8 );
+    $flag += $data->{failqual} *      ( 2**9 );
+    $flag += $data->{pcrdup} *        ( 2**10 );
+    $flag += $data->{supplementary} * ( 2**11 );
+
+    return $flag;
 }
 
 =head2 decrypt
@@ -1802,7 +1853,12 @@ sub prelim_filter {
     my $name_sort_check = defined $config->{name_sort_check} ? $config->{name_sort_check} : $name_sort_input;
     if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Start ========\n"; }
     my ( $fn, $path, $suffix ) = fileparse( $input, ( '.srt.bam', '.bam' ) );
-    my $header = $self->_run_cmd("samtools view -H $input");
+    my $header       = $self->_run_cmd("samtools view -H $input");
+    my @split_header = split( /\n/, $header );
+    my $last_pg      = $split_header[-1];
+    my $last_pg_id   = ( split /\t/, $last_pg )[1];
+    $last_pg_id =~ s/ID\:/PP\:/;
+    $header = $header . "\@CO\tID:Prelim-filter\tPN:LGTseek\t$last_pg_id\tVN:$VERSION\n";
     my @output_list;    ## Array of output bams to return
 
     ## Check if the output exists already
@@ -1841,7 +1897,7 @@ sub prelim_filter {
     }
 
     ## (2). QUICK/dirty Check to make sure the reads are PE and name sorted properly.
-    if ( $self->{name_sort_check} == 1 ) {
+    if ( defined $self->{name_sort_check} and $self->{name_sort_check} == 1 ) {
         if ( $self->{verbose} ) { print STDERR "======== &prelim_filter 2x Check PE & name sort: Start ========\n"; $self->time_check; }
         open( my $chk, "samtools view $sorted_bam | head |" ) or $self->fail("*** Error *** &prelim_filter can't open the name-sorted-input.bam: $sorted_bam\n");
         my %dbl_chk_hash;
@@ -1863,7 +1919,7 @@ sub prelim_filter {
         }
 
         if ( $die_count >= 2 ) {
-            die "*** Error *** This bam is missing atleast 2 PE mate-pairs in the first 10 reads. It is highly likely this bam isn't PE or name sorted properly. 
+            die "*** Error *** This bam is missing atleast 2 proper-pairs in the first 10 reads. It is highly likely this bam isn't PE or name sorted properly. 
             Please manually inspect this bam: $sorted_bam . If the bam is correct, relaunch prelim_filter with --name_sort_check=0.\n";
         }
     }
@@ -1879,6 +1935,7 @@ sub prelim_filter {
     my $MM                = 0;
     my $MU                = 0;
     my $UU                = 0;
+    my $SC                = 0;
 
     if ( $prelim_filter == 1 ) {
         if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Filter Start ========\n"; }
@@ -1888,6 +1945,8 @@ sub prelim_filter {
         my $output = "$output_dir/$fn\_$count\_prelim.bam";
         open( my $out, "| samtools view -S - -bo $output" ) || $self->fail("*** Error *** Can't open: $output because: $!\n");
         print $out "$header";
+
+        # print $out "\@CO\tID:Prelim-filter\tPG:LGTseek\tVN:$VERSION\n";
         push( @output_list, $output );
 
         ## Open input bam
@@ -1896,11 +1955,10 @@ sub prelim_filter {
         ##      Read through and filter bam reads, splitting output as we go
 
         while ( $more_lines == 1 ) {
-            my $read1 = <$infh>;
-            my $read2 = <$infh>;
+            my $read1 = $self->_read_bam_line($infh);
+            my $read2 = $self->_read_bam_line($infh);
+
             my $print = 0;
-            ## Stop if we have empty lines
-            if ( !$read1 || !$read2 ) { $more_lines = 0; last; }
             ## (3). Split output: close the current output and open a new output
             if ( $i >= $seqs_per_file && $split_bam == 1 ) {
                 close $out or $self->fail("*** Error *** Unable to close &prelim_filter output: $output\n");
@@ -1909,72 +1967,78 @@ sub prelim_filter {
                 open( $out, "| samtools view -S - -bo $output" ) || $self->fail("*** Error *** Can't open: $output because: $!\n");
                 push( @output_list, $output );
                 print $out "$header";
+
+                # print $out "\@CO\tID:Prelim-filter\tPN:LGTseek\tVN:$VERSION\n";
                 $i = 0;
             }
 
-            my ( $id1, $flag1, $cigar1, $sequence1 ) = ( split /\t/, $read1 )[ 0, 1, 5, 9 ];
-            my ( $id2, $flag2, $cigar2, $sequence2 ) = ( split /\t/, $read2 )[ 0, 1, 5, 9 ];
-
-            ## Check sequence id's. ## Both id's must be the same && no "null" reads
-            while ( $id2 =~ /null/ ) {
+            ## Skip "null" reads
+            while ( $read2->{id} =~ /null/ ) {
                 $num_null++;
-                $read2 = <$infh>;
-                ( $id2, $flag2, $cigar2, $sequence2 ) = ( split /\t/, $read2 )[ 0, 1, 5, 9 ];
+                $read2 = $self->_read_bam_line($infh);
             }
-            ## Remove trailing read id \1 \2 to make sure we have the same id's for both reads.
-            $id1 =~ s/(.+)\/\d+/$1/;
-            $id2 =~ s/(.+)\/\d+/$1/;
-            ## Both id's must be the same.
-            while ( $id1 =~ /null/ || $id1 ne $id2 ) {    ## If id1 isn't the same as id2, skip id1. Keep the pair moving down the bam until both are the same.
-                if   ( $id1 =~ /null/ ) { $num_null++; }
-                else                    { $num_singletons++; }
+            while ( $read1->{id} =~ /null/ ) {
+                $num_null++;
                 $read1 = $read2;
-                $read2 = <$infh>;
-                ( $id1, $flag1, $cigar1, $sequence1 ) = ( split /\t/, $read1 )[ 0, 1, 5, 9 ];
-                ( $id2, $flag2, $cigar2, $sequence2 ) = ( split /\t/, $read2 )[ 0, 1, 5, 9 ];
+                $read2 = $self->_read_bam_line($infh);
             }
-            ## Convert sam flag into usable data
-            my $converted_flag1 = $self->_parseFlag($flag1);
-            my $converted_flag2 = $self->_parseFlag($flag2);
+            ## Skip Secondary & Supplementary reads
+            while ( $read1->{flag}->{secondary} or $read1->{flag}->{supplementary} ) {
+                if ( $read1->{flag}->{secondary} )     { $num_secondary++; }
+                if ( $read1->{flag}->{supplementary} ) { $num_supplementary++; }
+                $read1 = $read2;
+                $read2 = $self->_read_bam_line($infh);
+            }
+            while ( $read2->{flag}->{secondary} or $read2->{flag}->{supplementary} ) {
+                if ( $read2->{flag}->{secondary} )     { $num_secondary++; }
+                if ( $read2->{flag}->{supplementary} ) { $num_supplementary++; }
+                $read2 = $self->_read_bam_line($infh);
+            }
 
-            ## Count number of read types
-            if ( !$converted_flag1->{'qunmapped'} && !$converted_flag2->{'qunmapped'} ) { $MM += 2; }    ## M_M
+            ## Make sure we have the same read ID's
+            while ( $read1->{id} ne $read2->{id} ) {
+                $num_singletons++;
+                $read1 = $read2;
+                $read2 = $self->_read_bam_line($infh);
+            }
 
-            ## FILTER OUT seconday aln reads
-            if ( $converted_flag1->{'secondary'} || $converted_flag2->{'secondary'} ) { $num_secondary++; next; }
-
-#if ( $converted_flag1->{'supplementary'} || $converted_flag2->{'supplementary'} ) { $num_supplementary++; next; }  # I don't want to implement this until I know for sure what the "supplementary" would look like in the .bam
-
-            ## FILTER FOR reads that are UM (M_UM,UM_M,UU)
-            if ( $converted_flag1->{'qunmapped'} || $converted_flag2->{'qunmapped'} ) {
+            ## Count number of read types & filter for potential LGT reads (MU, UM, UU)
+            if ( !$read1->{flag}->{qunmapped} && !$read2->{flag}->{qunmapped} ) { $MM += 2; }    ## Count M_M
+            if ( $read1->{flag}->{qunmapped} or $read2->{flag}->{qunmapped} ) {
                 $print = 1;
-                if ( $converted_flag1->{'qunmapped'}  && !$converted_flag1->{'munmapped'} ) { $MU += 2; }    ## U_M
-                if ( !$converted_flag1->{'qunmapped'} && $converted_flag1->{'munmapped'} )  { $MU += 2; }    ## M_U
-                if ( $converted_flag1->{'qunmapped'}  && $converted_flag2->{'qunmapped'} )  { $UU += 2; }    ## U_U
+                if ( $read1->{flag}->{qunmapped}  && !$read2->{flag}->{qunmapped} ) { $MU += 2; }    ## U_M
+                if ( !$read1->{flag}->{qunmapped} && $read2->{flag}->{qunmapped} )  { $MU += 2; }    ## M_U
+                if ( $read1->{flag}->{qunmapped}  && $read2->{flag}->{qunmapped} )  { $UU += 2; }    ## U_U
             }
 
             ## FILTER FOR soft clipped reads
             if ( $keep_softclip == 1 ) {
                 map {
-                    if ( $_ =~ /(\d+)S/ && $1 >= $softclip_min ) { $print = 1; }                             ## 10.21.14 Testing more liberal softclip parsing
-                } ( $cigar1, $cigar2 );
+                    if ( $_ =~ /(\d+)S/ && $1 >= $softclip_min ) { $print = 1; $SC += 2; }           ## 10.21.14 Testing more liberal softclip parsing
+                } ( $read1->{cigar}, $read2->{cigar} );
             }
+
             if ( $print == 1 ) {
-                ## Substitute out read_id\1 || \2 before printing to _#_prelim.bam (Added 07.15.14)
+                ## Fix flags if one of the reads is both first & second
+                ( $read1, $read2 ) = $self->_fix_flags( $read1, $read2 );
+
+                ## Create filtered/fixed bam lines
                 map {
-                    chomp;
-                    my @f = split( /\t/, $_ );
-                    $f[0] =~ s/(\/\d{1})$//g;
-                    my $new_line = join( "\t", @f );
+                    chomp( my $original_line = $_->{line} );
+                    my @split_original_line = split( /\t/, $original_line );
+                    my $fixed_flag = $self->_create_flag( $_->{flag} );
+
+                    # Create the polished output (removed \1 & \2 from id, removed flag=First & Second, removed tags)
+                    my $new_line = join( "\t", $_->{id}, $fixed_flag, @split_original_line[ 2 .. 10 ] );
                     print $out "$new_line\n";
                 } ( $read1, $read2 );
 
-                #  print $out "$read1$read2"; ## 07.15.14 This code was working but I am trying to sub out \1 && \2 in code above
                 $i        += 2;
                 $num_pass += 2;
             }
         }
-        close $out;    ## or $self->fail("Can't close out: $output because: $!\n");
+        close $out;
+
         ## Check to make sure the last file isn't empty.
         if ( $self->empty_chk( { input => $output } ) == 1 ) {
             $self->_run_cmd("rm $output");
@@ -1991,10 +2055,80 @@ sub prelim_filter {
     my @sort_out_list = sort @output_list;
     if ( $self->{verbose} ) {
         print STDERR "======== &prelim_filter: MM:$MM | Bad Singletons:$num_singletons | Null:$num_null | Secondary:$num_secondary | Supplementary:$num_supplementary ==\n";
-        print STDERR "======== &prelim_filter: Pass:$num_pass | MU:$MU | UU:$UU ==\n";
+        print STDERR "======== &prelim_filter: Pass:$num_pass | MU:$MU | UU:$UU | SC:$SC ==\n";
         print STDERR "======== &prelim_filter: Finished ========\n";
     }
     return \@sort_out_list;
+}
+
+=head2 &_read_bam_line
+
+ Title   : _read_bam_line
+ Usage   : my $read = $self->_read_bam_line($filehandle)
+ Function: Read in a bam line, split important data into hash for each read, convert flag
+ Returns : hash->{id}           = id w/ \1 or \2 substituted off
+           hash->{flag}         = converted flag
+           hash->{sequence}
+           hash->{cigar}
+ Args    : 
+=cut
+
+sub _read_bam_line {
+    my ( $self, $fh ) = @_;
+    my $line = <$fh>;
+    if ( !$line ) { last; }
+    chomp($line);
+    my ( $id, $flag, $cigar, $sequence ) = ( split /\t/, $line )[ 0, 1, 5, 9 ];
+    $id =~ s/(.+)\/\d+/$1/;
+    my $converted_flag = $self->_parseFlag($flag);
+    return {
+        id       => $id,
+        flag     => $converted_flag,
+        sequence => $sequence,
+        cigar    => $cigar,
+        line     => $line,
+    };
+}
+
+=head2 &_fix_flags
+
+ Title   : _fix_flags
+ Usage   : ($read1,$read2)=$self->_fix_flags($read1,$read2);
+ Function: Fix reads with first & second flags
+ Returns : 
+ Args    : 
+=cut
+
+sub _fix_flags {
+    my ( $self, $read1, $read2 ) = @_;
+
+    # If read1 is First and Second ...
+    if ( $read1->{flag}->{first} && $read1->{flag}->{last} ) {
+        print STDERR "TEST1\n";
+
+        # If read2 is last, make read1 first
+        if ( $read2->{flag}->{last} ) {
+            $read1->{flag}->{last} = 0;
+        }
+        elsif ( $read2->{flag}->{first} ) {
+            $read1->{flag}->{first} = 0;
+        }
+    }
+
+    # If read2 is First and Second ...
+    if ( $read2->{flag}->{first} && $read2->{flag}->{last} ) {
+        print STDERR "TEST2\n";
+
+        # If read1 is first, make read2 last
+        if ( $read1->{flag}->{first} ) {
+            $read2->{flag}->{first} = 0;
+        }
+        elsif ( $read1->{flag}->{last} ) {
+            $read2->{flag}->{last} = 0;
+        }
+    }
+    return ( $read1, $read2 );
+
 }
 
 =head2 &filter_bam_by_ids
@@ -2006,13 +2140,14 @@ sub prelim_filter {
  Returns : A hash{bam} = new filtered bam 
            A hash{count} = # ids found
  Args    : A hash containing potentially several config options:
-        input_bam     => bam for filtering
-        output_dir    => directory for output
-        output_prefix => Prefix for output
-        output_suffix => Suffix for output
-        output        => Full Path, prefix, name, and suffix for output. 
-        good_list     => File path with list of desired reads
-        bad_list      => File path with a list of reads to discard
+        input_bam           => bam for filtering
+        output_dir          => directory for output
+        output_prefix       => Prefix for output
+        output_suffix       => Suffix for output
+        header_comment      => "\@PG\tID:lgtseeq\tPG:filter-criteria\tVN:$VERSION"
+        output              => Full Path, prefix, name, and suffix for output. 
+        good_list           => File path with list of desired reads
+        bad_list            => File path with a list of reads to discard
 =cut
 
 sub filter_bam_by_ids {
@@ -2041,13 +2176,21 @@ sub filter_bam_by_ids {
     my $prefix  = defined $config->{output_prefix} ? $config->{output_prefix} : $fn;
     my $suffix  = defined $config->{output_suffix} ? $config->{output_suffix} : "filtered";
     my $out     = defined $config->{output}        ? "$config->{output}"      : "$out_dir/$prefix\_$suffix\.bam";
-    my $cmd     = "samtools view -H $input";
-    my $header  = $self->_run_cmd($cmd);
+    my $header  = $self->_run_cmd("samtools view -H $input");
     open( my $in, "-|", "samtools view $input" )
         or $self->fail("*** Error *** &filter_bam_by_ids can't open input bam: $input because: $!\n");
     open( my $fh, "| samtools view -S - -bo $out" )
         or $self->fail("*** Error *** &filter_bam_by_ids can't open  output bam: $out because: $!\n");
     print $fh "$header";
+
+    if ( defined $config->{header_comment} ) {
+        my @split_header = split( /\n/, $header );
+        my $last_pg      = $split_header[-1];
+        my $last_pg_id   = ( split /\t/, $last_pg )[1];
+        $last_pg_id =~ s/ID\:/PP\:/;
+        chomp( $config->{header_comment} );
+        print $fh "$config->{header_comment}\t$last_pg_id\n";
+    }
 
     while (<$in>) {
         chomp;
@@ -2198,9 +2341,10 @@ sub validated_bam {
     ## Use the list of blast validated LGT's create a new bam.
     ## $valid_bam is a hash->{count} & ->{file}
     my $valid_bam = $self->filter_bam_by_ids(
-        {   input_bam => $input,
-            good_list => "$out_dir/$prefix\_valid_blast_read.list",
-            output    => $out
+        {   input_bam      => $input,
+            header_comment => "\@CO\tID:Blast-validate\tPG:LGTseek\tVN:$VERSION",
+            good_list      => "$out_dir/$prefix\_valid_blast_read.list",
+            output         => $out
         }
     );
 
@@ -2236,7 +2380,7 @@ sub new2 {
 
     ## Now open the config file
     ## First determine the proper file path for the config file
-    if ( $options->{conf_file} =~ /^\~(.*)/ ) {
+    if ( defined $options->{conf_file} and $options->{conf_file} =~ /^\~(.*)/ ) {
         $options->{conf_file} = File::HomeDir->my_home . $1;
     }    ## This is incase the user passed a config file like ~/config.file
     my $conf_file
