@@ -52,7 +52,7 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
-our $VERSION = '1.00';
+our $VERSION = '1.01';
 use warnings;
 no warnings 'misc';
 no warnings 'uninitialized';
@@ -756,7 +756,7 @@ sub runBWA {
     if ( $config->{input_bam} ) {
         if ( $self->empty_chk( { input => $config->{input_bam} } ) == 1 ) {
             print STDERR "*** Error *** &runBWA input: $config->{input_bam} is empty.\n";
-            return $config->{input_bam};
+            return [ $config->{input_bam} ];
         }
         my ( $name, $path, $suff ) = fileparse( $config->{input_bam}, ( "_prelim.bam", ".bam" ) );
         $basename           = $name;
