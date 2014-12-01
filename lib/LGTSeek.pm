@@ -52,7 +52,7 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
-our $VERSION = '1.01';
+our $VERSION = '1.02';
 use warnings;
 no warnings 'misc';
 no warnings 'uninitialized';
