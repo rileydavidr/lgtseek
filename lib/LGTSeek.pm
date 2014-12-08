@@ -52,7 +52,7 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
-our $VERSION = '1.02';
+our $VERSION = '1.03';
 use warnings;
 no warnings 'misc';
 no warnings 'uninitialized';
@@ -384,8 +384,13 @@ sub _run_cmd {
     if ( $self->{verbose} ) { print STDERR "CMD: $cmd\n"; }
     my $res = `$cmd`;
     if ($?) {
-        print STDERR "$cmd\n\n$?";
-        $self->fail("*** Error *** $cmd died with message:\n$res\n\n");
+        print STDERR "FAIL_CMD: $cmd died with message: $res\n";
+        print STDERR "Pausing 1 min and trying to run the cmd again.\n";
+        sleep 60;
+        chomp( $res = `$cmd` );
+        if ($?) {
+            $self->fail("*** Error *** $cmd died with message:\n$res\n\n");
+        }
     }
     return $res;
 }
