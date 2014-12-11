@@ -52,7 +52,7 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 use warnings;
 no warnings 'misc';
 no warnings 'uninitialized';
@@ -214,7 +214,7 @@ sub prinseqFilterBam {
 sub _prinseqFilterPaired {
     my ( $self, $bam_file, $output_dir, $overwrite ) = @_;
 
-    my ( $name, $path, $suff ) = fileparse( $bam_file, ".bam" );
+    my ( $name, $path, $suff ) = fileparse( $bam_file, @{ $self->{bam_suffix_list} } );
 
     $output_dir = $output_dir ? $output_dir : $path;
 
@@ -249,10 +249,12 @@ sub _prinseqFilterPaired {
         # Generate concatenated fastq files for prinseq derep filtering  ## Need to incorporate sam2fasta.pm KBS 01.07.14
         if ( $dedup == 1 ) {
             if ( $self->{verbose} ) { print STDERR "======== Deduplication Filtering========\n"; }
-            $self->_run_cmd("$self->{samtools_bin} sort -m $self->{sort_mem} -@ $self->{threads} $bam_file $tmp_dir/$name\.psrt");
-            $self->_run_cmd("$Picard FixMateInformation I=$tmp_dir/$name\.psrt.bam");
-            $self->_run_cmd(
-                "$Picard MarkDuplicates INPUT=$tmp_dir/$name\.psrt.bam OUTPUT=$tmp_dir/$name\_dedup.bam METRICS_FILE=$tmp_dir/$name\_dedup-metrics.txt ASSUME_SORTED=true REMOVE_DUPLICATES=false");
+            if ( $self->_run_cmd("$self->{samtools_bin} view -H $bam_file | head -n 1") !~ /queryname/ ) {
+                $self->_run_cmd("$self->{samtools_bin} sort -n -m $self->{sort_mem} -@ $self->{threads} $bam_file $tmp_dir/$name\.nsrt");
+                $bam_file = "$tmp_dir/$name\.nsrt.bam";
+            }
+            $self->_run_cmd("$Picard FixMateInformation I=$bam_file SO=coordinate VALIDATION_STRINGENCY=SILENT");
+            $self->_run_cmd("$Picard MarkDuplicates I=$bam_file OUTPUT=$tmp_dir/$name\_dedup.bam METRICS_FILE=$tmp_dir/$name\_dedup-metrics.txt REMOVE_DUPLICATES=false VALIDATION_STRINGENCY=SILENT");
             open( my $BAM, "samtools view $tmp_dir/$name\_dedup.bam |" ) or $self->fail("*** Error *** &prinseqFilterBam unable to open the deduped bam: $tmp_dir/$name\_dedup.bam");
             open( my $BADS, "> $tmp_dir/$name\_derep_bad_ids.out" ) or $self->fail("*** Error *** &prinseqFilterBam unable to open output file for dedup bad ids: $tmp_dir/$name\_derep_bad_ids.out");
             while ( my $bam_line = $self->_read_bam_line($BAM) ) {
@@ -267,7 +269,7 @@ sub _prinseqFilterPaired {
 
             # Generate single-read fastq for low complexity filtering
             if ( $self->{verbose} ) { print STDERR "======== Low Complexity Filter ========\n"; }
-            $self->_run_cmd("$Picard SamToFastq INPUT=$bam_file FASTQ=$tmp_dir/$name\_1.fastq SECOND_END_FASTQ=$tmp_dir/$name\_2.fastq");
+            $self->_run_cmd("$Picard SamToFastq INPUT=$bam_file FASTQ=$tmp_dir/$name\_1.fastq SECOND_END_FASTQ=$tmp_dir/$name\_2.fastq VALIDATION_STRINGENCY=SILENT");
 
             # Run prinseq for low complexity filtering
             $self->_run_cmd("perl $prinseq_bin --fastq=$tmp_dir/$name\_1.fastq --out_good null --out_bad=$tmp_dir/$name\_lc_1_bad -lc_method dust -lc_threshold 7");
@@ -2373,8 +2375,8 @@ sub new2 {
     # Usefull list for fileparse: @{$lgtseek->{'list'}}
     my $self = {
         bam_suffix_list => [
-            '_resorted.\d+.bam', '_resorted\.bam', '\.gpg\.bam', '_prelim\.bam',  '_name-sort\.bam', '_pos-sort\.bam', '_psort\.bam', '-psort\.bam',
-            '.psort.bam',        '_nsort\.bam',    '\.srt\.bam', '\.sorted\.bam', '\.bam'
+            '_resorted.\d+.bam', '_resorted\.bam', '\.gpg\.bam',  '_prelim\.bam', '_name-sort\.bam', '_pos-sort\.bam', '_psort\.bam', '-psort\.bam',
+            '\.psort\.bam',      '\.psrt\.bam',    '_nsort\.bam', '\.nsrt\.bam',  '\.srt\.bam',      '\.sorted\.bam',  '\.bam'
         ],
         sam_suffix_list   => [ '.sam.gz',         '.sam' ],
         fastq_suffix_list => [ '_\d+\.fastq\.gz', '\.fastq\.gz', '_\d+\.fastq', '_\d+\.fq', '\.fastq', '\.fq' ],
