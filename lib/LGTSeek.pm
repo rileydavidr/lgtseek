@@ -52,7 +52,7 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
-our $VERSION = '1.04';
+our $VERSION = '1.06';
 use warnings;
 no warnings 'misc';
 no warnings 'uninitialized';
@@ -212,8 +212,8 @@ sub prinseqFilterBam {
 =cut
 
 sub _prinseqFilterPaired {
-    my ( $self, $bam_file, $output_dir, $overwrite ) = @_;
-
+    my ( $self, $original_bam, $output_dir, $overwrite ) = @_;
+    my $bam_file = $original_bam;
     my ( $name, $path, $suff ) = fileparse( $bam_file, @{ $self->{bam_suffix_list} } );
 
     $output_dir = $output_dir ? $output_dir : $path;
@@ -237,7 +237,7 @@ sub _prinseqFilterPaired {
             print STDERR "Already found the output for &prinseqFilter: $output_dir/$name\_bad_ids.out";
         }
         $filtered = $self->filter_bam_by_ids(
-            {   input_bam      => $bam_file,
+            {   input_bam      => $original_bam,
                 header_comment => "\@CO\tID:PrinSeq-filtered\tPG:LGTseek\tVN:$VERSION",
                 bad_list       => "$output_dir/$name\_bad_ids.out",
             }
@@ -250,8 +250,8 @@ sub _prinseqFilterPaired {
         if ( $dedup == 1 ) {
             if ( $self->{verbose} ) { print STDERR "======== Deduplication Filtering========\n"; }
             if ( $self->_run_cmd("$self->{samtools_bin} view -H $bam_file | head -n 1") !~ /queryname/ ) {
-                $self->_run_cmd("$self->{samtools_bin} sort -n -m $self->{sort_mem} -@ $self->{threads} $bam_file $tmp_dir/$name\.nsrt");
-                $bam_file = "$tmp_dir/$name\.nsrt.bam";
+                $self->_run_cmd("$self->{samtools_bin} sort -n -m $self->{sort_mem} -@ $self->{threads} $bam_file $tmp_dir/$name");
+                $bam_file = "$tmp_dir/$name\.bam";
             }
             $self->_run_cmd("$Picard FixMateInformation I=$bam_file SO=coordinate VALIDATION_STRINGENCY=SILENT");
             $self->_run_cmd("$Picard MarkDuplicates I=$bam_file OUTPUT=$tmp_dir/$name\_dedup.bam METRICS_FILE=$tmp_dir/$name\_dedup-metrics.txt REMOVE_DUPLICATES=false VALIDATION_STRINGENCY=SILENT");
@@ -278,7 +278,7 @@ sub _prinseqFilterPaired {
 
                 # Pull out bad ids
                 if ( $self->{verbose} ) { print STDERR "======== Pull Low-Cmplx-1 Bad ID's ========\n"; }
-                $self->_run_cmd("perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_1_bad.fastq > $tmp_dir/$name\_lc_1_bad_ids.out");
+                $self->_run_cmd("perl -e 'while(<>){s/\\@//;s/\\/\\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_1_bad.fastq > $tmp_dir/$name\_lc_1_bad_ids.out");
             }
             else {
                 if ( $self->{verbose} ) { print STDERR "Didn't find any low complexity sequences in read 1\n"; }
@@ -291,7 +291,7 @@ sub _prinseqFilterPaired {
             # Pull out bad ids
             if ( -e "$tmp_dir/$name\_lc_2_bad.fastq" ) {
                 if ( $self->{verbose} ) { print STDERR "======== Pull Low-Cmplx-2 Bad ID's ========\n"; }
-                $self->_run_cmd("perl -e 'while(<>){s/\@//;s/\_\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_2_bad.fastq > $tmp_dir/$name\_lc_2_bad_ids.out");
+                $self->_run_cmd("perl -e 'while(<>){s/\\@//;s/\\/\\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_2_bad.fastq > $tmp_dir/$name\_lc_2_bad_ids.out");
             }
             else {
                 if ( $self->{verbose} ) { print STDERR "Didn't find any low complexity sequences in read 2\n"; }
@@ -309,7 +309,7 @@ sub _prinseqFilterPaired {
 
         # Finally, filter based on dedup & lc bad ids
         $filtered = $self->filter_bam_by_ids(
-            {   input_bam      => $bam_file,
+            {   input_bam      => $original_bam,
                 output_dir     => $output_dir,
                 header_comment => "\@CO\tID:PrinSeq-filtered\tPG:LGTseek\tVN:$VERSION",
                 bad_list       => "$tmp_dir/$name\_prinseq-bad-ids.out",
@@ -449,14 +449,14 @@ sub downloadSRA {
         $exp_id =~ /^((.{3}).{3}).*/;
         $prefix       = $2;
         $thousand     = $1;
-        $path_to_file = "/sra/sra-instant/reads/ByExp/litesra/$prefix/$thousand/$exp_id";
+        $path_to_file = "/sra/sra-instant/reads/ByExp/sra/$prefix/$thousand/$exp_id";
         $output_dir   = "$output_dir/$prefix/$thousand/";
     }
     if ( $config->{run_id} ) {
         $config->{run_id} =~ /^((.{3}).{3}).*/;
         $prefix       = $2;
         $thousand     = $1;
-        $path_to_file = "/sra/sra-instant/reads/ByRun/litesra/$prefix/$thousand/$config->{run_id}";
+        $path_to_file = "/sra/sra-instant/reads/ByRun/sra/$prefix/$thousand/$config->{run_id}";
         $output_dir   = "$output_dir/$prefix/$thousand/";
     }
     elsif ( $config->{path} ) {
@@ -624,8 +624,8 @@ sub downloadCGHub {
     while ( $retry == 1 && $retry_attempts <= $retry_attempts_max ) {
         ## Download the files
         if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Downloading: analysis_id\=$download . . . ========\n"; }
-        my $cmd_string = "$genetorrent_path\/gtdownload --max-children $max_children -r $rate_limit -p $output_dir -c $cghub_key -d $download";
-        $self->_run_cmd($cmd_string);
+        $self->_run_cmd("$genetorrent_path\/gtdownload -l stdout -vv -t -k 60 --max-children $max_children -r $rate_limit -p $output_dir -c $cghub_key -d $download \&>$output_dir/gtdownload.log")
+            ;    # v1.05 Added better gtdownload error reporting to a specific gtdownload.log file. Also added a -k 60 minute fail timeout.
 
         ## Making  a hash of the bam filename = md5 sum.
         ## This will allow retrying to download if the bam/bai are not finished or correct.

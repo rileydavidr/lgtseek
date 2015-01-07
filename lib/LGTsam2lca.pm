@@ -160,7 +160,6 @@ sub writeOutput {
         } else {
             $out2=">-";
         }
-        print STDERR "independant output: $out2\nMerged output: $outf\n";
         open(OUT2,">","$out2") or die "Couldn't open $out2\n";
 #    }
 
@@ -207,7 +206,7 @@ sub writeOutput {
     }
     
     return {
-        independant => $out2,
+        independent => $out2,
         normal => $outf
     };
 }
@@ -344,8 +343,8 @@ sub process_file {
 #            &process_sam_line($l);
 #        }
 #    }
-    print STDERR scalar keys (%{$self->{seen_mates}}) . " reads seen in $file\n";
-    print STDERR scalar keys (%{$self->{reads_by_mate_id}}) . " reads with hits\n";
+#    print STDERR scalar keys (%{$self->{seen_mates}}) . " reads seen in $file\n";
+#    print STDERR scalar keys (%{$self->{reads_by_mate_id}}) . " reads with hits\n";
 }
 
 
