@@ -52,7 +52,7 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
-our $VERSION = '1.06';
+our $VERSION = '1.08';
 use warnings;
 no warnings 'misc';
 no warnings 'uninitialized';
@@ -136,7 +136,8 @@ sub getGiTaxon {
                 'chunk_size' => 10000,
                 'idx_dir'    => $self->{taxon_idx_dir},
                 'host'       => $self->{taxon_host},
-                'type'       => 'nucleotide'
+                'type'       => 'nucleotide',
+                'verbose'    => $self->{verbose},
             }
         );
     }
@@ -775,7 +776,7 @@ sub runBWA {
         $conf->{input_base} = $config->{input_base};
     }
     else {
-        die "Must provide either a value to either input_bam or to input_base and input_dir\n";
+        $self->fail("Must provide either a value to either input_bam or to input_base and input_dir\n");
     }
 
     my $pre = '';
@@ -2277,7 +2278,7 @@ sub empty_chk {
 =head2 &fail
 
  Title   : fail
- Usage   : if(1+1!=2){fail("Because you can't add!");}
+ Usage   : if(1+1!=2){$self->fail("Because you can't add!");}
  Function: Die with either die or confess depending on verbosity.
  Args    : Die message.
 =cut
@@ -2299,21 +2300,24 @@ sub fail {
         input           =>  Input bam to parse LGT reads from
         by_clone        =>  LGTFinder Output
         by_trace        =>  Not implemented yet.
-        output_dir      =>  
-        output_prefix   =>
-        output_suffix   =>
-        output          =>
+        output_dir      =>  /path/for/output/
+        output_prefix   =>  {$prefix}_$suffix.bam  [ {$input_fn}.bam ]
+        output_suffix   =>  $prefix_{$suffix}.bam  [ "filterd" ]
+        output          =>  /path/and/name/for/output.bam
 =cut
 
 sub validated_bam {
     my ( $self, $config ) = @_;
-    if ( !$config->{input} ) {
-        $self->fail("*** Error *** Must pass &validated_bam an input bam to parse reads from with input =>.\n");
+    if ( $self->{verbose} )  { print STDERR "======== &validated_bam: startingt ========\n"; }
+    if ( !$config->{input} ) { $self->fail("*** Error *** Must pass &validated_bam an input bam to parse reads from with input =>.\n"); }
+    if ( !$config->{by_clone} && !$config->{by_trace} ) { $self->fail("*** Error *** Must pass &validated_bam an LGTFinder output with by_clone => or by_trace=>.\n"); }
+    if ( $self->empty_chk( { input => $config->{input} } ) == 1 ) {
+        if ( $self->{verbose} ) { print STDERR "======== &validated_bam: Skipping this input because it is empty! ========\n"; }
+        return {
+            count => "0",
+            file  => undef,
+        };
     }
-    if ( !$config->{by_clone} && !$config->{by_trace} ) {
-        $self->fail("*** Error *** Must pass &validated_bam an LGTFinder output with by_clone => or by_trace=>.\n");
-    }
-
     my $input = "$config->{input}";
     my ( $fn, $path, $suf ) = fileparse( $input, ".bam" );
     my $out_dir = defined $config->{output_dir}    ? $config->{output_dir}    : $path;
