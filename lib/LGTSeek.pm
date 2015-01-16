@@ -151,7 +151,7 @@ sub getGiTaxon {
  Title   : prinseqFilterBam
  Usage   : my $filteredBam = $LGTSeek->prinseqFilterBam({'input_bam' => '/path/to/file.bam'...})
  Function: Prinseq filter a bam file.
- Returns : A Hash $ref->{bam} = path to the filtered bam. $ref->{count} = # of reads passing filtering.
+ Returns : A Hash $ref->{bam} = path to the filtered bam. $ref->{count} = # of reads passing filtering. 
  Args    : 
         input_bam    => /path/to/file.bam
         output_dir   => /path/for/output.bam
@@ -249,7 +249,7 @@ sub _prinseqFilterPaired {
 
         # Generate concatenated fastq files for prinseq derep filtering  ## Need to incorporate sam2fasta.pm KBS 01.07.14
         if ( $dedup == 1 ) {
-            if ( $self->{verbose} ) { print STDERR "======== Deduplication Filtering========\n"; }
+            if ( $self->{verbose} ) { print STDERR "========= Deduplication Filtering =========\n"; }
             if ( $self->_run_cmd("$self->{samtools_bin} view -H $bam_file | head -n 1") !~ /queryname/ ) {
                 $self->_run_cmd("$self->{samtools_bin} sort -n -m $self->{sort_mem} -@ $self->{threads} $bam_file $tmp_dir/$name");
                 $bam_file = "$tmp_dir/$name\.bam";
@@ -269,7 +269,7 @@ sub _prinseqFilterPaired {
         if ( $rm_low_cmplx == 1 ) {
 
             # Generate single-read fastq for low complexity filtering
-            if ( $self->{verbose} ) { print STDERR "======== Low Complexity Filter ========\n"; }
+            if ( $self->{verbose} ) { print STDERR "========= Low Complexity Filter ========\n"; }
             $self->_run_cmd("$Picard SamToFastq INPUT=$bam_file FASTQ=$tmp_dir/$name\_1.fastq SECOND_END_FASTQ=$tmp_dir/$name\_2.fastq VALIDATION_STRINGENCY=SILENT");
 
             # Run prinseq for low complexity filtering
@@ -278,7 +278,7 @@ sub _prinseqFilterPaired {
             if ( -e "$tmp_dir/$name\_lc_1_bad.fastq" ) {
 
                 # Pull out bad ids
-                if ( $self->{verbose} ) { print STDERR "======== Pull Low-Cmplx-1 Bad ID's ========\n"; }
+                if ( $self->{verbose} ) { print STDERR "========= Pull Low-Cmplx-1 Bad ID's ========\n"; }
                 $self->_run_cmd("perl -e 'while(<>){s/\\@//;s/\\/\\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_1_bad.fastq > $tmp_dir/$name\_lc_1_bad_ids.out");
             }
             else {
@@ -291,7 +291,7 @@ sub _prinseqFilterPaired {
 
             # Pull out bad ids
             if ( -e "$tmp_dir/$name\_lc_2_bad.fastq" ) {
-                if ( $self->{verbose} ) { print STDERR "======== Pull Low-Cmplx-2 Bad ID's ========\n"; }
+                if ( $self->{verbose} ) { print STDERR "========= Pull Low-Cmplx-2 Bad ID's ========\n"; }
                 $self->_run_cmd("perl -e 'while(<>){s/\\@//;s/\\/\\d//;print;<>;<>;<>;}' $tmp_dir/$name\_lc_2_bad.fastq > $tmp_dir/$name\_lc_2_bad_ids.out");
             }
             else {
@@ -624,14 +624,14 @@ sub downloadCGHub {
     my $retry_attempts = 0;
     while ( $retry == 1 && $retry_attempts <= $retry_attempts_max ) {
         ## Download the files
-        if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Downloading: analysis_id\=$download . . . ========\n"; }
+        if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Downloading: analysis_id\=$download . . . ========\n"; }
         $self->_run_cmd("$genetorrent_path\/gtdownload -l stdout -vv -t -k 60 --max-children $max_children -r $rate_limit -p $output_dir -c $cghub_key -d $download \&>$output_dir/gtdownload.log")
             ;    # v1.05 Added better gtdownload error reporting to a specific gtdownload.log file. Also added a -k 60 minute fail timeout.
 
         ## Making  a hash of the bam filename = md5 sum.
         ## This will allow retrying to download if the bam/bai are not finished or correct.
         if ( $config->{analysis_id} ) {
-            if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Downloading cgquery.xml file to get md5 numbers.\n"; }
+            if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Downloading cgquery.xml file to get md5 numbers.\n"; }
             my $cmd = "$python $genetorrent_path\/cgquery \"analysis_id\=$config->{analysis_id}\" -o $output_dir/cgquery.xml";
             if ( $self->{verbose} ) { print STDERR "$cmd\n"; }
             my $cgquery_retry    = 1;
@@ -662,7 +662,7 @@ sub downloadCGHub {
             }
         }
 
-        if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Finished downloading: $download. Checking md5's ========\n"; }
+        if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Finished downloading: $download. Checking md5's ========\n"; }
         ## Find a list of the files downloaded
         my @files;
         foreach my $files_to_download ( keys %cghub_md5_hash ) {
@@ -677,7 +677,7 @@ sub downloadCGHub {
             my $md5 = $self->_run_cmd("md5sum -b $full_file_path | cut -f1 -d \" \"");
             chomp($md5);
             if ( $md5 eq $cghub_md5_hash{$file_name} ) {
-                if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: md5 is correct for: $full_file_path ========\n"; }
+                if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: md5 is correct for: $full_file_path ========\n"; }
                 if ( $file_name =~ /\.bam$/ ) {
                     push( @bams_downloaded_list, $full_file_path );
                 }
@@ -689,7 +689,7 @@ sub downloadCGHub {
             elsif ( $md5 ne $cghub_md5_hash{$file_name} ) {
                 if ( $self->{verbose} ) {
                     print STDERR
-                        "======== &downloadCGHub: md5 Inconsistency for file: $full_file_path Calculated_md5: $md5 Expected-md5: $cghub_md5_hash{$file_name} || Going to retry download, retry number: $retry_attempts ========\n";
+                        "========= &downloadCGHub: md5 Inconsistency for file: $full_file_path Calculated_md5: $md5 Expected-md5: $cghub_md5_hash{$file_name} || Going to retry download, retry number: $retry_attempts ========\n";
                 }
                 $retry = 1;
                 $retry_attempts++;
@@ -1906,7 +1906,7 @@ sub prelim_filter {
 
     ## (2). QUICK/dirty Check to make sure the reads are PE and name sorted properly.
     if ( defined $self->{name_sort_check} and $self->{name_sort_check} == 1 ) {
-        if ( $self->{verbose} ) { print STDERR "======== &prelim_filter 2x Check PE & name sort: Start ========\n"; $self->time_check; }
+        if ( $self->{verbose} ) { print STDERR "========= &prelim_filter 2x Check PE & name sort: Start ========\n"; $self->time_check; }
         open( my $chk, "samtools view $sorted_bam | head |" ) or $self->fail("*** Error *** &prelim_filter can't open the name-sorted-input.bam: $sorted_bam\n");
         my %dbl_chk_hash;
         while (<$chk>) {
@@ -1931,7 +1931,7 @@ sub prelim_filter {
             Please manually inspect this bam: $sorted_bam . If the bam is correct, relaunch prelim_filter with --name_sort_check=0.\n";
         }
     }
-    if ( $self->{verbose} ) { print STDERR "======== &prelim_filter 2x Check PE & name sort:: Finished ========\n"; $self->time_check; }
+    if ( $self->{verbose} ) { print STDERR "========= &prelim_filter 2x Check PE & name sort:: Finished ========\n"; $self->time_check; }
 
     ## (3). Prelim filtering.
     my $more_lines        = 1;
@@ -1946,7 +1946,7 @@ sub prelim_filter {
     my $SC                = 0;
 
     if ( $prelim_filter == 1 ) {
-        if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Filter Start ========\n"; }
+        if ( $self->{verbose} ) { print STDERR "========= &prelim_filter: Filter Start ========\n"; }
         ## Setup and open output
         my $i      = 0;                                       ## Used to count number of lines per bam as being processed
         my $count  = 0;                                       ## Used to count number of split output bams
@@ -2053,7 +2053,7 @@ sub prelim_filter {
             my $remove_empty_bam = pop(@output_list);
         }
         if ( $name_sort_input == 1 && $sorted_bam =~ /name-sorted.bam$/ ) { $self->_run_cmd("rm $sorted_bam"); }
-        if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Filter Finished ========\n"; $self->time_check; }
+        if ( $self->{verbose} ) { print STDERR "========= &prelim_filter: Filter Finished ========\n"; $self->time_check; }
     }
     else {
         push( @output_list, $sorted_bam );
@@ -2062,8 +2062,8 @@ sub prelim_filter {
 
     my @sort_out_list = sort @output_list;
     if ( $self->{verbose} ) {
-        print STDERR "======== &prelim_filter: MM:$MM | Bad Singletons:$num_singletons | Null:$num_null | Secondary:$num_secondary | Supplementary:$num_supplementary ==\n";
-        print STDERR "======== &prelim_filter: Pass:$num_pass | MU:$MU | UU:$UU | SC:$SC ==\n";
+        print STDERR "========= &prelim_filter: MM:$MM | Bad Singletons:$num_singletons | Null:$num_null | Secondary:$num_secondary | Supplementary:$num_supplementary ==\n";
+        print STDERR "========= &prelim_filter: Pass:$num_pass | MU:$MU | UU:$UU | SC:$SC ==\n";
         print STDERR "======== &prelim_filter: Finished ========\n";
     }
     return \@sort_out_list;
@@ -2308,11 +2308,11 @@ sub fail {
 
 sub validated_bam {
     my ( $self, $config ) = @_;
-    if ( $self->{verbose} )  { print STDERR "======== &validated_bam: startingt ========\n"; }
+    if ( $self->{verbose} )  { print STDERR "======== &validated_bam: starting ========\n"; }
     if ( !$config->{input} ) { $self->fail("*** Error *** Must pass &validated_bam an input bam to parse reads from with input =>.\n"); }
     if ( !$config->{by_clone} && !$config->{by_trace} ) { $self->fail("*** Error *** Must pass &validated_bam an LGTFinder output with by_clone => or by_trace=>.\n"); }
     if ( $self->empty_chk( { input => $config->{input} } ) == 1 ) {
-        if ( $self->{verbose} ) { print STDERR "======== &validated_bam: Skipping this input because it is empty! ========\n"; }
+        if ( $self->{verbose} ) { print STDERR "========= &validated_bam: Skipping this input because it is empty! ========\n"; }
         return {
             count => "0",
             file  => undef,
