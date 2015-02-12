@@ -123,7 +123,6 @@ sub filterBlast {
         open( $fh, "-|", "$args->{blast_bin} -a $args->{threads} -d $args->{db} -m8 -i $input" )
             or confess "Unable to run: $args->{blast_bin} on: $input with db: $args->{db}\n";
     }
-
     &_process_file($fh);
     my $list = &_create_list_of_outputs($args);
 

@@ -12,9 +12,9 @@ Need to put something useful here
 A module to run computes and process the output of data for purposes
 of finding putative lateral gene transfer.
 
-=head1 AUTHOR - David R. Riley
+=head1 AUTHOR - Karsten B. Sieber & David R. Riley
 
-e-mail: driley@som.umaryland.edu
+e-mail: karsten.sieber@gmail.com
 
 =head1 APPENDIX
 
@@ -32,27 +32,27 @@ Internal methods are usually preceded with a _
         downloadSRA         : Download SRA file
         dumpFastq           : Convert sra file 2 fastq
         downloadCGHub       : Download bam from GC-Hub
-        decrypt             : 
         prelim_filter       : Filter for potential LGT reads from human mapped bam
-        runBWA              : Execute BWA mapping
-        bwaPostProcess      : 
-        prinseqFilterBam    :
-        filter_bam_by_ids   :
-        sam2fasta           :
-        splitBam            :
-        blast2lca           :
-        bestBlast2          :
-        runLgtFinder        :
-        getGiTaxon          : 
-        mpileup             :
-        empty_chk           :
-        fail                :
-        _parseFlag          :
-        _run_cmd            :
+        runBWA              : Execute BWA aln mapping
+        bwaPostProcess      : Filter LGT reads from host and donor 
+        prinseqFilterBam    : Make a new bam by removing low complexity and duplicate reads
+        filter_bam_by_ids   : Make a new bam by filtering for read-ids
+        sam2fasta           : Make fasta file from a bam
+        splitBam            : Split 1 bam into multiple bams  
+        blast2lca           : Generate LCA using blast
+        bestBlast2          : Run Blast keeping besthits only
+        runLgtFinder        : Process blast results for LGT reads
+        getGiTaxon          : Create gi2taxon object
+        mpileup             : Make mpileup file for a bam
+        empty_chk           : Check if an file is empty
+        fail                : Gracefully error out
+        _parseFlag          : Return easy access sam flag information
+        _create_flag        : Create a sam flag
+        _run_cmd            : Run a unix command
 =cut
 
 package LGTSeek;
-our $VERSION = '1.08';
+our $VERSION = '1.10';
 use warnings;
 no warnings 'misc';
 no warnings 'uninitialized';
@@ -596,13 +596,13 @@ sub downloadCGHub {
     if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Start ========\n"; }
 
     # Check for all the genetorrent related options
-    my $output_dir         = $config->{output_dir}       ? $config->{output_dir}       : $self->{output_dir};
-    my $genetorrent_path   = $config->{genetorrent_path} ? $config->{genetorrent_path} : $self->{genetorrent_path};    ## Defaults to lgtseq.conf
-    my $python             = $self->{'python_2_7_path'}  ? $self->{'python_2_7_path'}  : "python";
-    my $cghub_key          = $config->{cghub_key}        ? $config->{cghub_key}        : $self->{cghub_key};
-    my $retry_attempts_max = $config->{retry_attempts}   ? $config->{retry_attempts}   : $self->{retry_attempts};      ## Defaults to lgtseq.conf
-    my $max_children       = $config->{threads}          ? $config->{threads}          : $self->{threads};             ## Defaults to lgtseq.conf
-    my $rate_limit         = $config->{rate_limit}       ? $config->{rate_limit}       : $self->{rate_limit};          ## Defaults to lgtseq.conf
+    my $output_dir         = defined $config->{output_dir}       ? $config->{output_dir}       : $self->{output_dir};
+    my $genetorrent_path   = defined $config->{genetorrent_path} ? $config->{genetorrent_path} : $self->{genetorrent_path};    ## Defaults to lgtseq.conf
+    my $python             = defined $self->{'python_2_7_path'}  ? $self->{'python_2_7_path'}  : "python";
+    my $cghub_key          = defined $config->{cghub_key}        ? $config->{cghub_key}        : $self->{cghub_key};
+    my $retry_attempts_max = defined $config->{retry_attempts}   ? $config->{retry_attempts}   : $self->{retry_attempts};      ## Defaults to lgtseq.conf
+    my $max_children       = defined $config->{threads}          ? $config->{threads}          : $self->{threads};             ## Defaults to lgtseq.conf
+    my $rate_limit         = defined $config->{rate_limit}       ? " -r $config->{rate_limit}" : "-r $self->{rate_limit}";     ## Defaults to lgtseq.conf
 
     if ( !$self->{cghub_key} && !$config->{cghub_key} ) {
         die "Need to specify the path to the cghub_key\n";
@@ -625,7 +625,7 @@ sub downloadCGHub {
     while ( $retry == 1 && $retry_attempts <= $retry_attempts_max ) {
         ## Download the files
         if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Downloading: analysis_id\=$download . . . ========\n"; }
-        $self->_run_cmd("$genetorrent_path\/gtdownload -l stdout -vv -t -k 60 --max-children $max_children -r $rate_limit -p $output_dir -c $cghub_key -d $download \&>$output_dir/gtdownload.log")
+        $self->_run_cmd("$genetorrent_path\/gtdownload -l stdout -v -t -k 300 --max-children $max_children $rate_limit -p $output_dir -c $cghub_key -d $download \&>$output_dir/gtdownload.log")
             ;    # v1.05 Added better gtdownload error reporting to a specific gtdownload.log file. Also added a -k 60 minute fail timeout.
 
         ## Making  a hash of the bam filename = md5 sum.
@@ -1380,9 +1380,9 @@ sub blast2lca {
             my @f2 = split( /\t/, $line2 );
             my $id1 = $f1[0];
             my $id2 = $f2[0];
-            $id1 =~ /([A-Za-z0-9-.|:]+)(\_?[1,2]?)/;
+            $id1 =~ /([A-Za-z0-9-.|:]+)(\_?\/?[1,2]?)/;
             my $id1_short = $1;
-            $id2 =~ /([A-Za-z0-9-.|:]+)(\_?[1,2]?)/;
+            $id2 =~ /([A-Za-z0-9-.|:]+)(\_?\/?[1,2]?)/;
             my $id2_short = $1;
 
             if ( $id1_short ne $id2_short ) {
@@ -1848,6 +1848,9 @@ sub prelim_filter {
     if ( $self->empty_chk( { input => $input } ) == 1 ) {
         print STDERR "*** Warning *** &prelim_filter input: $input is empty.\n";
     }
+    if ( $input !~ /\.bam$/ ) {
+        $self->fail("*** Error *** Input file: $input doesn't look like a bam without a .bam suffix.");
+    }
     my $output_dir = $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
     $self->_run_cmd("mkdir -p $output_dir");
 
@@ -1875,7 +1878,7 @@ sub prelim_filter {
     if ( -e "$output_dir$fn\_0_prelim.bam" ) { $files_exist = 1; }
     if ( $files_exist == 1 && $overwrite == 0 ) {
         if ( $self->{verbose} ) {
-            print STDERR "***Warning*** Already found the output for &prelim_filter: $output_dir$fn\_0_prelim.bam\n";
+            print STDERR "*** Warning *** Already found the output for &prelim_filter: $output_dir$fn\_0_prelim.bam\n";
         }
         chomp( my @output_list = `find $output_dir -name '$fn\*_prelim.bam'` );
         return \@output_list;
@@ -2353,7 +2356,7 @@ sub validated_bam {
     ## $valid_bam is a hash->{count} & ->{file}
     my $valid_bam = $self->filter_bam_by_ids(
         {   input_bam      => $input,
-            header_comment => "\@CO\tID:Blast-validate\tPG:LGTseek\tVN:$VERSION",
+            header_comment => "\@CO\tID:Blast-validated\tPG:LGTseek\tVN:$VERSION",
             good_list      => "$out_dir/$prefix\_valid_blast_read.list",
             output         => $out
         }
@@ -2405,7 +2408,9 @@ sub new2 {
         while (<IN>) {
             chomp;
             next if ( $_ =~ /^#/ );
-            my ( $key, $value ) = split( /\s+/, $_ );
+            $_ =~ /(\w+)\s+([A-Za-z0-9-._\/: ]+)/;
+            my ( $key, $value ) = ( $1, $2 );
+            map { $_ =~ s/\s+$//g; } ( $key, $value );    ## Remove trailing white space.
             $config{$key} = $value;
         }
         close IN or confess "*** Error *** can't close conf_file: $conf_file\n";
