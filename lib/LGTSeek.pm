@@ -12,9 +12,9 @@ Need to put something useful here
 A module to run computes and process the output of data for purposes
 of finding putative lateral gene transfer.
 
-=head1 AUTHOR - Karsten B. Sieber & David R. Riley
+=head1 AUTHOR - David R. Riley & Karsten B. Sieber 
 
-e-mail: karsten.sieber@gmail.com
+e-mail: Karsten.Sieber@gmail.com
 
 =head1 APPENDIX
 
@@ -32,6 +32,7 @@ Internal methods are usually preceded with a _
         downloadSRA         : Download SRA file
         dumpFastq           : Convert sra file 2 fastq
         downloadCGHub       : Download bam from GC-Hub
+        downloadEGA         : Download data from EGA
         prelim_filter       : Filter for potential LGT reads from human mapped bam
         runBWA              : Execute BWA aln mapping
         bwaPostProcess      : Filter LGT reads from host and donor 
@@ -52,17 +53,17 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
-our $VERSION = '1.10';
+our $VERSION = '1.11';
 use warnings;
 no warnings 'misc';
 no warnings 'uninitialized';
 use strict;
 use version;
+
+# Dependencies
 use Carp;
 $Carp::MaxArgLen = 0;
 use File::Basename;
-
-# Dependencies
 use Data::Dumper;
 use GiTaxon;
 use LGTBestBlast;
@@ -71,6 +72,7 @@ use LGTbwa;
 use LGTsam2lca;
 use XML::Simple qw(:strict);
 use File::HomeDir;
+use Cwd;
 use Time::SoFar;
 $| = 1;
 
@@ -507,7 +509,7 @@ sub downloadSRA {
 =head2 &dumpFastq
 
  Title   : dumpFastq
- Usage   : $lgtseek->dumpFastq(({'sra_file' => 'SRX01234'})
+ Usage   : $lgtseek->dumpFastq({'sra_file' => 'SRX01234'})
  Function: Run the sratoolkit program dump-fastq
  Returns : An object with a path and basename of the output as well as a list of output files
  Args    : An object with element 'sra_file' and optionally the path to the sratoolkit install
@@ -577,12 +579,12 @@ sub dumpFastq {
 
  Title   : downloadCGHub
  Usage   : $lgtseek->downloadCGHub({
-        analysis_id => '00007994-abeb-4b16-a6ad-7230300a29e9', 
+        analysis_id     => '00007994-abeb-4b16-a6ad-7230300a29e9', 
         xml             => '/file/path/files_to_download.xml'
-        output_dir => '/file/path/for/output/dir/',
-        threads => 
-        rate_limit =>
-        cghub_key  =>   /path/to/key.file
+        output_dir      => '/file/path/for/output/dir/',
+        threads         => 
+        rate_limit      =>
+        cghub_key       => '/path/to/key.file'
 
         });
  Function: Download TCGA bam files from the CGHub
@@ -596,13 +598,14 @@ sub downloadCGHub {
     if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Start ========\n"; }
 
     # Check for all the genetorrent related options
-    my $output_dir         = defined $config->{output_dir}       ? $config->{output_dir}       : $self->{output_dir};
-    my $genetorrent_path   = defined $config->{genetorrent_path} ? $config->{genetorrent_path} : $self->{genetorrent_path};    ## Defaults to lgtseq.conf
+    my $output_dir = defined $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->_run_cmd("mkdir -p $output_dir");
+    my $genetorrent_path   = defined $config->{genetorrent_path} ? $config->{genetorrent_path} : $self->{genetorrent_path};    ## Defaults to lgtseek.conf
     my $python             = defined $self->{'python_2_7_path'}  ? $self->{'python_2_7_path'}  : "python";
     my $cghub_key          = defined $config->{cghub_key}        ? $config->{cghub_key}        : $self->{cghub_key};
-    my $retry_attempts_max = defined $config->{retry_attempts}   ? $config->{retry_attempts}   : $self->{retry_attempts};      ## Defaults to lgtseq.conf
-    my $max_children       = defined $config->{threads}          ? $config->{threads}          : $self->{threads};             ## Defaults to lgtseq.conf
-    my $rate_limit         = defined $config->{rate_limit}       ? " -r $config->{rate_limit}" : "-r $self->{rate_limit}";     ## Defaults to lgtseq.conf
+    my $max_retry_attempts = defined $config->{retry_attempts}   ? $config->{retry_attempts}   : $self->{retry_attempts};      ## Defaults to lgtseek.conf
+    my $max_children       = defined $config->{threads}          ? $config->{threads}          : $self->{threads};             ## Defaults to lgtseek.conf
+    my $rate_limit         = defined $config->{rate_limit}       ? " -r $config->{rate_limit}" : "-r $self->{rate_limit}";     ## Defaults to lgtseek.conf
 
     if ( !$self->{cghub_key} && !$config->{cghub_key} ) {
         die "Need to specify the path to the cghub_key\n";
@@ -610,101 +613,119 @@ sub downloadCGHub {
     if ( !$self->{genetorrent_path} && !$config->{genetorrent_path} ) {
         die "Need to specify an genetorrent_path (where is genetorrent/gtdownload installed) in order to download from CGHub\n";
     }
-    if ( !$config->{output_dir} && !$config->{output_dir} ) {
+    if ( !$self->{output_dir} && !$config->{output_dir} ) {
         die "Need to specify an output_dir in order to download for CGHub\n";
     }
 
     # We can pass an analysis_id (UUID), URI, .xml .gto to download. They can all be called analysis_id and will work the same way.
     my $download = $config->{analysis_id} ? $config->{analysis_id} : $config->{xml};
 
-    #Retry the download several times just incase.
+    # Retry the download several times just incase.
     my @bams_downloaded_list;
     my @bais_downloaded_list;
-    my $retry          = 1;
-    my $retry_attempts = 0;
-    while ( $retry == 1 && $retry_attempts <= $retry_attempts_max ) {
+    my $retry               = 1;
+    my $retry_attempts_made = 0;
+
+DOWNLOAD_BAM: while ( $retry == 1 && ( $retry_attempts_made <= $max_retry_attempts ) ) {
         ## Download the files
         if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Downloading: analysis_id\=$download . . . ========\n"; }
-        $self->_run_cmd("$genetorrent_path\/gtdownload -l stdout -v -t -k 300 --max-children $max_children $rate_limit -p $output_dir -c $cghub_key -d $download \&>$output_dir/gtdownload.log")
-            ;    # v1.05 Added better gtdownload error reporting to a specific gtdownload.log file. Also added a -k 60 minute fail timeout.
-
-        ## Making  a hash of the bam filename = md5 sum.
-        ## This will allow retrying to download if the bam/bai are not finished or correct.
-        if ( $config->{analysis_id} ) {
-            if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Downloading cgquery.xml file to get md5 numbers.\n"; }
-            my $cmd = "$python $genetorrent_path\/cgquery \"analysis_id\=$config->{analysis_id}\" -o $output_dir/cgquery.xml";
-            if ( $self->{verbose} ) { print STDERR "$cmd\n"; }
-            my $cgquery_retry    = 1;
-            my $cgquery_attempts = 0;
-            my $retry_pause      = 3;
-            while ( $cgquery_retry == 1 && $cgquery_attempts <= 3 ) {
-                my $cgquery_exec_return = `$cmd`;
-                if ($?) {
-                    print STDERR "***Error*** :: $cmd :: failed with message: $cgquery_exec_return :: $?. Will now retry cgquery.\n";
-                    $cgquery_attempts += 1;
-                    $retry_pause = $retry_pause * 10;
-                    sleep $retry_pause;
-                }
-                else {
-                    $cgquery_retry = 0;
-                }
+        if ( $self->{verbose} ) {
+            print STDERR "CMD: $genetorrent_path\/gtdownload -l stdout -v -t -k 300 --max-children $max_children $rate_limit -p $output_dir -c $cghub_key -d $download \&>$output_dir/gtdownload.log\n";
+        }
+        `$genetorrent_path\/gtdownload -l stdout -v -t -k 300 --max-children $max_children $rate_limit -p $output_dir -c $cghub_key -d $download \&>$output_dir/gtdownload.log`;
+        if ($?) {
+            $retry_attempts_made++;
+            ## Every 3rd attempt delete and start over.
+            if ( $retry_attempts_made % 3 ) {
+                if ( $self->{verbose} ) { print STDERR "*** WARNING **** Download Failed!  ========\n"; }
+                if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Retrying the download again.\n"; }
+                sleep 30;
+                goto DOWNLOAD_BAM;
+            }
+            ## If the $retry_attempts_made is an even number we delete the original download and start it over cleanly
+            else {
+                if ( $self->{verbose} ) { print STDERR "*** WARNING **** Download Failed!  ========\n"; }
+                if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Delete download and restart.\n"; }
+                my $bam_to_delete_string = $self->_run_cmd("find $output_dir -mindepth 1 -name \'*.bam\'");
+                my @bam_to_delete_array = split( /\n/, $bam_to_delete_string );
+                $self->_run_cmd("rm -rf $bam_to_delete_array[0]");
+                $self->_run_cmd("rm -rf $bam_to_delete_array[0]\.bai") if ( -e "$bam_to_delete_array[0]\.bai" );
+                $self->_run_cmd("rm $output_dir/gtdownload.log");
+                goto DOWNLOAD_BAM;
             }
         }
-        my %cghub_md5_hash;
-        my $xml = $config->{xml} ? $config->{xml} : "$output_dir/cgquery.xml";
-        my $ref = XMLin( $xml, KeyAttr => { Result => 'id' }, ForceArray => [ 'Result', 'file' ], GroupTags => { files => 'file' } )
-            or confess "======== &downloadCGHub: &XMLin is unable to read in the cgquery.xml file: $xml because: $!\n";
-        foreach my $sample ( sort keys %{ $ref->{'Result'} } ) {
-            foreach my $file ( @{ $ref->{'Result'}->{$sample}->{files} } ) {
-                if ( $file->{filename} =~ /\.bam$|\.bai$/ ) {
-                    $cghub_md5_hash{ $file->{filename} } = $file->{checksum}->{content};
-                }
-            }
+        else {
+            $retry = 0;
         }
+    }
 
-        if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Finished downloading: $download. Checking md5's ========\n"; }
-        ## Find a list of the files downloaded
-        my @files;
-        foreach my $files_to_download ( keys %cghub_md5_hash ) {
-            my $found_file = $self->_run_cmd("find $output_dir -name \'*$files_to_download\'");
-            chomp($found_file);
-            push( @files, $found_file );
+    #  Making  a hash of the bam filename = md5 sum.
+    ## This will allow retrying to download if the bam/bai are not finished or correct.
+    if ( $config->{analysis_id} ) {
+        if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Downloading cgquery.xml file to get md5 numbers.\n"; }
+        my $cmd = "$python $genetorrent_path\/cgquery \"analysis_id\=$config->{analysis_id}\" -o $output_dir/cgquery.xml";
+        if ( $self->{verbose} ) { print STDERR "$cmd\n"; }
+
+        my $cgquery_exec_return = `$cmd`;
+        if ($?) {
+            print STDERR "***Error*** :: $cmd :: failed with message: $cgquery_exec_return :: $?. Will now retry cgquery.\n";
+            sleep 360;
+            $cgquery_exec_return = `$cmd`;
         }
-
-        ## Calculate the md5sum
-        foreach my $full_file_path (@files) {
-            my ( $file_name, $path_to_file ) = fileparse($full_file_path);
-            my $md5 = $self->_run_cmd("md5sum -b $full_file_path | cut -f1 -d \" \"");
-            chomp($md5);
-            if ( $md5 eq $cghub_md5_hash{$file_name} ) {
-                if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: md5 is correct for: $full_file_path ========\n"; }
-                if ( $file_name =~ /\.bam$/ ) {
-                    push( @bams_downloaded_list, $full_file_path );
-                }
-                elsif ( $file_name =~ /\.bai$/ ) {
-                    push( @bais_downloaded_list, $full_file_path );
-                }
-                $retry = 0;
-            }
-            elsif ( $md5 ne $cghub_md5_hash{$file_name} ) {
-                if ( $self->{verbose} ) {
-                    print STDERR
-                        "========= &downloadCGHub: md5 Inconsistency for file: $full_file_path Calculated_md5: $md5 Expected-md5: $cghub_md5_hash{$file_name} || Going to retry download, retry number: $retry_attempts ========\n";
-                }
-                $retry = 1;
-                $retry_attempts++;
+    }
+    if ( !-e "$output_dir/cgquery.xml" ) { $self->fail("*** Error *** No $output_dir/cgquery.xml"); }
+    my $xml = $config->{xml} ? $config->{xml} : "$output_dir/cgquery.xml";
+    my %cghub_md5_hash;
+    my $ref = XMLin( $xml, KeyAttr => { Result => 'id' }, ForceArray => [ 'Result', 'file' ], GroupTags => { files => 'file' } )
+        or confess "======== &downloadCGHub: &XMLin is unable to read in the cgquery.xml file: $xml because: $!\n";
+    foreach my $sample ( sort keys %{ $ref->{'Result'} } ) {
+        foreach my $file ( @{ $ref->{'Result'}->{$sample}->{files} } ) {
+            if ( $file->{filename} =~ /\.bam$|\.bai$/ ) {
+                $cghub_md5_hash{ $file->{filename} } = $file->{checksum}->{content};
             }
         }
     }
 
-    my $files = {
-        'bam_files' => \@bams_downloaded_list,
-        'bai_files' => \@bais_downloaded_list,
-    };
+    if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: Finished downloading: $download. Checking md5's ========\n"; }
+    ## Find a list of the files downloaded
+    my @files;
+    foreach my $files_to_download ( keys %cghub_md5_hash ) {
+        my $found_file = $self->_run_cmd("find $output_dir -name \'*$files_to_download\'");
+        chomp($found_file);
+        push( @files, $found_file );
+    }
+
+    ## Calculate the md5sum
+    my $md5_fail_status = 0;
+    foreach my $full_file_path (@files) {
+        my ( $file_name, $path_to_file ) = fileparse($full_file_path);
+        my $md5 = $self->_run_cmd("md5sum -b $full_file_path | cut -f1 -d \" \"");
+        chomp($md5);
+        if ( $md5 eq $cghub_md5_hash{$file_name} ) {
+            if ( $self->{verbose} ) { print STDERR "========= &downloadCGHub: md5 is correct for: $full_file_path ========\n"; }
+            if ( $file_name =~ /\.bam$/ ) {
+                push( @bams_downloaded_list, $full_file_path );
+            }
+            elsif ( $file_name =~ /\.bai$/ ) {
+                push( @bais_downloaded_list, $full_file_path );
+            }
+        }
+        elsif ( $md5 ne $cghub_md5_hash{$file_name} ) {
+            if ( $file_name =~ /\.bam$/ ) { $md5_fail_status++; }
+            if ( $self->{verbose} ) {
+                print STDERR "========= &downloadCGHub: md5 Inconsistency for file: $full_file_path Calculated_md5: $md5 Expected-md5: $cghub_md5_hash{$file_name}.  ========\n";
+            }
+        }
+    }
+
+    if ( $md5_fail_status >= 1 ) { $self->fail("***Error*** &downloadCGHub: BAM download failed; the calculated md5 is inconsistent with the expected md5.\n"); }
+
+    $self->_run_cmd("rm $output_dir/*.xml");
+    $self->_run_cmd("rm $output_dir/*.gto");
 
     if ( $self->{verbose} ) { print STDERR "======== &downloadCGHub: Finished ========\n"; }
     $self->time_check;
-    return $files;
+    return \@bams_downloaded_list;
 }
 
 =head2 runBWA
@@ -1978,8 +1999,6 @@ sub prelim_filter {
                 open( $out, "| samtools view -S - -bo $output" ) || $self->fail("*** Error *** Can't open: $output because: $!\n");
                 push( @output_list, $output );
                 print $out "$header";
-
-                # print $out "\@CO\tID:Prelim-filter\tPN:LGTseek\tVN:$VERSION\n";
                 $i = 0;
             }
 
@@ -2061,6 +2080,7 @@ sub prelim_filter {
     else {
         push( @output_list, $sorted_bam );
     }
+
     $self->time_check;
 
     my @sort_out_list = sort @output_list;
@@ -2367,6 +2387,155 @@ sub validated_bam {
     return $valid_bam;
 }
 
+=head2 downloadEGA
+
+ Title   : downloadEGA
+ Usage   : my $bam_file = $lgtseek->downloadEGA(
+            {
+                input           =>      'ID#_to_search_for' or 'ID#_1_1.rnaseq.fastq.gz.gpg,ID#_1_2.rnaseq.fastq.gz.gpg'
+                output_dir      =>      '/file/path/for/output/dir/',
+                aln_human       =>      <0|1> [0] 1= Aln fastq downloads to hg19
+                ega_DL_client   =>      '/path/to/EGAs/webin-data-streamer-EGA-Download-Client.jar'
+                overwrite       =>      < 0|1 > [ .lgtseek.conf ]
+            });
+ Function:  Download fastq files from EGA, decrypt, and map to human.
+            ## This subroutine does NOT support BAM downloads yet##
+ 
+ Returns :  A bam file mapped at the human genome.
+ Args    : 
+
+=cut
+
+sub downloadEGA {
+    my ( $self, $config ) = @_;
+    if ( $self->{verbose} ) { print STDERR "======= &downloadEGA: Start ========\n"; }
+
+    if ( !$config->{input} ) { $self->fail("*** Error *** &downloadEGA must have an input.\n"); }
+
+    # Check for all the genetorrent related options
+    my $output_dir = defined $config->{output_dir} ? $config->{output_dir} : $self->{output_dir};
+    $self->_run_cmd("mkdir -p $output_dir");
+    my $ega_DL_client      = defined $config->{ega_DL_client}  ? $config->{ega_DL_client}  : $self->{ega_DL_client};
+    my $java               = defined $self->{java_bin}         ? $self->{java_bin}         : "java";
+    my $overwrite          = defined $config->{overwrite}      ? $config->{overwrite}      : $self->{overwrite};
+    my $max_retry_attempts = defined $config->{retry_attempts} ? $config->{retry_attempts} : $self->{retry_attempts};    ## Defaults to lgtseq.conf
+
+    # First, determine if the input is an ID to search for or a specific file(s) to download.
+    my @files_to_download;
+    my @fastqs;
+    ## If the input looks like a filename:
+    if ( $config->{input} =~ /(_[12]{1}){0,1}(\.\w+)?\.f\w{0,3}q(.gz)?(.gpg)?/ ) {
+        my @split_filenames = split( /,/, $config->{input} );
+        if ( scalar(@split_filenames) > 2 ) { $self->fail("*** Error *** The input looks like more than 2 fastq files to download. Only pass 2 fastq per input for download and mapping.\n"); }
+        foreach my $files (@split_filenames) {
+            $files =~ /(.+)\.gpg/;
+            push( @fastqs, $1 );
+            if ( ( !-e "$output_dir/$1.cip" and !-e "$output_dir/$1" ) or ( ( -e "$output_dir/$1.cip" or -e "$output_dir/$1" ) and $overwrite == 1 ) ) {
+                push( @files_to_download, $files );
+            }
+        }
+    }
+    else {
+        if ( $self->{verbose} ) { print STDERR "========= &downloadEGA: Query FASTQs to download ========\n"; }
+        my $retry_attempts_made = 0;
+        my $retry               = 1;
+    QUERY_EGA: while ( $retry == 1 && ( $retry_attempts_made <= $max_retry_attempts ) ) {
+            my @ega_query = split( /\n/, $self->_run_cmd("$java -jar $ega_DL_client -p -list -user $self->{ega_user} -pass $self->{ega_pass} | grep $config->{input} | cut -f1") );
+            ## Check we got something from the query. If not, retry!
+            if ( $ega_query[0] !~ /\w+/ ) {
+                $retry_attempts_made++;
+                sleep 90;
+                goto QUERY_EGA;
+            }
+            else { $retry = 0; }
+
+            # Add each file from the ega_query to the list of files to download
+            map {
+                my $fq_fn = fileparse( $_, ".gpg" );
+                push( @fastqs, $fq_fn );
+                if ( ( !-e "$output_dir/$fq_fn.cip" and !-e "$output_dir/$fq_fn" ) or ( ( -e "$output_dir/$fq_fn.cip" or -e "$output_dir/$fq_fn" ) and $overwrite == 1 ) ) {
+                    push( @files_to_download, $_ );
+                }
+                elsif ( $self->{verbose} ) { print STDERR "========= &downloadEGA: Skipping download, $fq_fn exists ========\n"; }
+            } @ega_query;
+        }
+    }
+
+    # Second, Download the files
+    ## Change to the appropriate directory for downloading
+    my $current_directory = getcwd;    ## So we can change back after download and decrypt are complete.
+    chdir($output_dir);
+    ## Build the -files string for the download client.
+    my $ega_DL_client_files_to_DL_string = " -f ";
+    $ega_DL_client_files_to_DL_string = join( ",", @files_to_download );
+    $ega_DL_client_files_to_DL_string = "-f " . $ega_DL_client_files_to_DL_string;
+    ## Now, download the file(s)
+    if ( scalar( @files_to_download >= 1 ) ) {
+        if ( $self->{verbose} ) { print STDERR "========= &downloadEGA: Downloading FASTQs ========\n"; }
+        my $retry               = 1;
+        my $retry_attempts_made = 0;
+    DOWNLOAD_EGA: while ( $retry == 1 && ( $retry_attempts_made <= $max_retry_attempts ) ) {
+            my $download
+                = "$java -jar $ega_DL_client -p -user $self->{ega_user} -pass $self->{ega_pass} -d -re LGTSeq -destination $output_dir $ega_DL_client_files_to_DL_string > $output_dir/EGA_download_log.txt";
+            if ( $self->{verbose} ) { print STDERR "CMD: $download\n"; }
+            `$download`;
+            ## If we can detect there was a problem, either retry or exit.
+            if ( $? or $self->_run_cmd("tail -n 1 $output_dir/EGA_download_log.txt") =~ /RETURN CODE 1/ ) {
+                if ( $retry_attempts_made == $max_retry_attempts ) {
+                    $self->fail("======== &downloadEGA: Multiple download errors.\n");
+                }
+                else {
+                    print STDERR "======== &downloadEGA: Download failed, trying again.";
+                    foreach my $files (@files_to_download) { $self->_run_cmd("rm $output_dir/$files*"); }
+                    $self->_run_cmd("rm $output_dir/EGA_download_log.txt");
+                    $retry_attempts_made++;
+                    goto DOWNLOAD_EGA;
+                }
+            }
+            ## Otherwise report a successful download and move on
+            else {
+                if ( $self->{verbose} ) { print STDERR "========= &downloadEGA: FASTQs downloaded ========\n"; }
+                $retry = 0;
+            }
+        }
+    }
+
+    # Third, Decrypt the downloaded files
+    my @tmp_return_list;
+    foreach my $fastq (@fastqs) {
+        if ( -e "$fastq.cip" and ( !-e $fastq or $overwrite == 1 ) ) {
+            if ( $self->{verbose} ) { print STDERR "========= &downloadEGA: Decrypting FASTQ: $fastq ========\n"; }
+            $self->_run_cmd("$java -jar $ega_DL_client -p -dc -re LGTSeq -destination $output_dir -f $fastq.cip");
+        }
+        elsif ( $self->{verbose} ) { print STDERR "========= &downloadEGA: Skipping decrypt, $fastq already decrypted ========\n"; }
+        my $tmp_fastq = "$output_dir/$fastq";
+        $tmp_fastq =~ s/\/{2,}/\//g;
+        push( @tmp_return_list, $tmp_fastq );
+    }
+    ## Move back to the original directory.
+    chdir($current_directory);
+    if ( -e "$output_dir/log.txt" ) { $self->_run_cmd("rm $output_dir/log.txt"); }
+
+    if ( $self->{verbose} ) { print STDERR "======= &downloadEGA: Finished ========\n"; }
+    $self->time_check;
+    return \@tmp_return_list;
+}
+
+=head2 &time_check
+
+ Title   : time_check
+ Usage   : $lgtseek->time_check;
+ Function: Print STDERR the clock time that has passed since start.
+
+=cut
+
+sub time_check {
+    my $self        = shift;
+    my $no_optimize = 1;
+    my $elapsed     = runtime( [$no_optimize] );
+    if ( $self->{verbose} ) { print STDERR "Time Since Start: $elapsed\n"; }
+}
+
 =head2 new2
 
  Title   : new2
@@ -2381,14 +2550,14 @@ sub new2 {
 
     # Usefull list for fileparse: @{$lgtseek->{'list'}}
     my $self = {
+        sam_suffix_list => [ '.sam.gz', '.sam' ],
         bam_suffix_list => [
             '_resorted.\d+.bam', '_resorted\.bam', '\.gpg\.bam',  '_prelim\.bam', '_name-sort\.bam', '_pos-sort\.bam', '_psort\.bam', '-psort\.bam',
             '\.psort\.bam',      '\.psrt\.bam',    '_nsort\.bam', '\.nsrt\.bam',  '\.srt\.bam',      '\.sorted\.bam',  '\.bam'
         ],
-        sam_suffix_list   => [ '.sam.gz',         '.sam' ],
-        fastq_suffix_list => [ '_\d+\.fastq\.gz', '\.fastq\.gz', '_\d+\.fastq', '_\d+\.fq', '\.fastq', '\.fq' ],
-        fasta_suffix_list   => [ '.fa.gz',   '.fasta.gz',     '.fasta', '.fa' ],
-        mpileup_suffix_list => [ '.mpileup', '_COVERAGE.txt', '.txt' ],
+        fastq_suffix_list   => [ qr/_[12]{1}\.f\w{0,3}q(.gz)?/, qr/_[12]{1}(\.\w+)?\.f\w*q(.gz)?/, qr/((_[12]{1})?\.\w+)?\.f\w*q(.gz)?/, '\.fastq\.gz', '\.f\w{0,3}q' ],
+        fasta_suffix_list   => [ qr/.f\w{3}a(.gz)?/,            '.fasta',                          '.fa' ],
+        mpileup_suffix_list => [ '.mpileup',                    '_COVERAGE.txt',                   '.txt' ],
         suffix_regex        => qr/\.[^\.]+/,
     };
 
@@ -2408,7 +2577,7 @@ sub new2 {
         while (<IN>) {
             chomp;
             next if ( $_ =~ /^#/ );
-            $_ =~ /(\w+)\s+([A-Za-z0-9-._\/: ]+)/;
+            $_ =~ /(\w+)\s+([A-Za-z0-9-._\/: \@]+)/;
             my ( $key, $value ) = ( $1, $2 );
             map { $_ =~ s/\s+$//g; } ( $key, $value );    ## Remove trailing white space.
             $config{$key} = $value;
@@ -2432,20 +2601,6 @@ sub new2 {
     return $self;
 }
 
-=head2 &time_check
-
- Title   : time_check
- Usage   : $lgtseek->time_check;
- Function: Print STDERR the clock time that has passed since start.
-
-=cut
-
-sub time_check {
-    my $self        = shift;
-    my $no_optimize = 1;
-    my $elapsed     = runtime( [$no_optimize] );
-    if ( $self->{verbose} ) { print STDERR "Time Since Start: $elapsed\n"; }
-}
-
 1;
 
+__END__
