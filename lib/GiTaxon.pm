@@ -206,10 +206,10 @@ sub getTaxon {
                 };
             }
         }
-        elsif ( Bio::DB::Taxonomy->new( -source => 'entrez' )->get_taxon( -taxonid => $taxonid ) ) {
+        else {
             my $db = Bio::DB::Taxonomy->new( -source => 'entrez' );
             my $taxon = $db->get_taxon( -taxonid => $taxonid );
-            if ( $taxon->isa('Bio::Taxon') ) {
+                if ( $taxon->isa('Bio::Taxon') ) {
                 my $name    = $taxon->scientific_name;
                 my $c       = $taxon;
                 my @lineage = ($name);
@@ -225,10 +225,11 @@ sub getTaxon {
                     'lineage'  => join( ";", @lineage )
                 };
             }
+            else {
+                print STDERR "**GiTaxon unable to find taxon for taxon_id: $taxonid & gi:$gi\n";
+            }
         }
-        else {
-            print STDERR "**GiTaxon unable to find taxon for taxon_id: $taxonid & gi:$gi\n";
-        }
+
         ## NEW ^^^ 01.08.15 KBS v1.07
         $self->{cache}->{$gi} = $retval;
     }

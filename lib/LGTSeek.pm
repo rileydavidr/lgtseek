@@ -256,8 +256,8 @@ sub _prinseqFilterPaired {
                 $self->_run_cmd("$self->{samtools_bin} sort -n -m $self->{sort_mem} -@ $self->{threads} $bam_file $tmp_dir/$name");
                 $bam_file = "$tmp_dir/$name\.bam";
             }
-            $self->_run_cmd("$Picard FixMateInformation I=$bam_file SO=coordinate VALIDATION_STRINGENCY=SILENT");
-            $self->_run_cmd("$Picard MarkDuplicates I=$bam_file OUTPUT=$tmp_dir/$name\_dedup.bam METRICS_FILE=$tmp_dir/$name\_dedup-metrics.txt REMOVE_DUPLICATES=false VALIDATION_STRINGENCY=SILENT");
+            $self->_run_cmd("$Picard FixMateInformation I=$bam_file TMP_DIR=$tmp_dir SO=coordinate ASSUME_SORTED=1 VALIDATION_STRINGENCY=SILENT");
+            $self->_run_cmd("$Picard MarkDuplicates I=$bam_file TMP_DIR=$tmp_dir OUTPUT=$tmp_dir/$name\_dedup.bam METRICS_FILE=$tmp_dir/$name\_dedup-metrics.txt REMOVE_DUPLICATES=false VALIDATION_STRINGENCY=SILENT");
             open( my $BAM, "samtools view $tmp_dir/$name\_dedup.bam |" ) or $self->fail("*** Error *** &prinseqFilterBam unable to open the deduped bam: $tmp_dir/$name\_dedup.bam");
             open( my $BADS, "> $tmp_dir/$name\_derep_bad_ids.out" ) or $self->fail("*** Error *** &prinseqFilterBam unable to open output file for dedup bad ids: $tmp_dir/$name\_derep_bad_ids.out");
             while ( my $bam_line = $self->_read_bam_line($BAM) ) {
@@ -419,9 +419,9 @@ sub downloadSRA {
     $self->{aspera_user}   = $config->{aspera_user}   ? $config->{aspera_user}   : $self->{aspera_user};
     $self->{aspera_params} = $config->{aspera_params} ? $config->{aspera_params} : $self->{aspera_params};
     $self->{aspera_path}   = $config->{aspera_path}   ? $config->{aspera_path}   : $self->{aspera_path};
+    $self->{aspera_path}   = $self->{aspera_path}     ? $self->{aspera_path}     : '~/.aspera/connect/';
     $self->{aspera_rate}   = $config->{aspera_rate}   ? $config->{aspera_rate}   : $self->{aspera_rate};
     $self->{output_dir}    = $config->{output_dir}    ? $config->{output_dir}    : $self->{output_dir};
-    $self->{aspera_path}   = $self->{aspera_path}     ? $self->{aspera_path}     : '~/.aspera/connect/';
 
     my $retry_attempts = $config->{retry_attempts} ? $config->{retry_attempts} : 10;
     if ( !$self->{aspera_host} ) {
@@ -1859,11 +1859,13 @@ sub mpileup {
         seqs_per_file   => [50000000] 
         name_sort_input => <0|1> [0] 1= Resort input bam on names
 
+    ## TODO: I should be able to implement the following samtools command to create a list of reads that pass prelim_filter criteria, then re-parse the input file for the reads and split the bams acocordingly. This may be significantly faster than the current implementation: "samtools view -F 3844 $input -u | view -f0x8 -" --> picard SamToFastQ
 =cut
 
 sub prelim_filter {
 
     ## General code scheme: (1) Resort based on names. (2) Filter out M_M reads. (3) Then finally split into chunks.
+    
     my ( $self, $config ) = @_;
     my $input = $config->{input_bam} ? $config->{input_bam} : $self->{input_bam};
     if ( $self->empty_chk( { input => $input } ) == 1 ) {
