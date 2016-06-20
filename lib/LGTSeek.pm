@@ -53,7 +53,7 @@ Internal methods are usually preceded with a _
 =cut
 
 package LGTSeek;
-our $VERSION = '1.11';
+our $VERSION = '1.12';
 use warnings;
 no warnings 'misc';
 no warnings 'uninitialized';
@@ -257,7 +257,9 @@ sub _prinseqFilterPaired {
                 $bam_file = "$tmp_dir/$name\.bam";
             }
             $self->_run_cmd("$Picard FixMateInformation I=$bam_file TMP_DIR=$tmp_dir SO=coordinate ASSUME_SORTED=1 VALIDATION_STRINGENCY=SILENT");
-            $self->_run_cmd("$Picard MarkDuplicates I=$bam_file TMP_DIR=$tmp_dir OUTPUT=$tmp_dir/$name\_dedup.bam METRICS_FILE=$tmp_dir/$name\_dedup-metrics.txt REMOVE_DUPLICATES=false VALIDATION_STRINGENCY=SILENT");
+            $self->_run_cmd(
+                "$Picard MarkDuplicates I=$bam_file TMP_DIR=$tmp_dir OUTPUT=$tmp_dir/$name\_dedup.bam METRICS_FILE=$tmp_dir/$name\_dedup-metrics.txt REMOVE_DUPLICATES=false VALIDATION_STRINGENCY=SILENT"
+            );
             open( my $BAM, "samtools view $tmp_dir/$name\_dedup.bam |" ) or $self->fail("*** Error *** &prinseqFilterBam unable to open the deduped bam: $tmp_dir/$name\_dedup.bam");
             open( my $BADS, "> $tmp_dir/$name\_derep_bad_ids.out" ) or $self->fail("*** Error *** &prinseqFilterBam unable to open output file for dedup bad ids: $tmp_dir/$name\_derep_bad_ids.out");
             while ( my $bam_line = $self->_read_bam_line($BAM) ) {
@@ -1865,7 +1867,7 @@ sub mpileup {
 sub prelim_filter {
 
     ## General code scheme: (1) Resort based on names. (2) Filter out M_M reads. (3) Then finally split into chunks.
-    
+
     my ( $self, $config ) = @_;
     my $input = $config->{input_bam} ? $config->{input_bam} : $self->{input_bam};
     if ( $self->empty_chk( { input => $input } ) == 1 ) {
@@ -1898,17 +1900,17 @@ sub prelim_filter {
     ## Check if the output exists already
     ## $output isn't set right at this point in the scrip to check if the final output already exist. FIX later.
     my $files_exist = 0;
-    if ( -e "$output_dir$fn\_0_prelim.bam" ) { $files_exist = 1; }
+    if ( -e "$output_dir/$fn\_0_prelim.bam" ) { $files_exist = 1; }
     if ( $files_exist == 1 && $overwrite == 0 ) {
         if ( $self->{verbose} ) {
-            print STDERR "*** Warning *** Already found the output for &prelim_filter: $output_dir$fn\_0_prelim.bam\n";
+            print STDERR "*** Warning *** Already found the output for &prelim_filter: $output_dir/$fn\_0_prelim.bam\n";
         }
         chomp( my @output_list = `find $output_dir -name '$fn\*_prelim.bam'` );
         return \@output_list;
     }
 
     ## Check we dont' have the name-sorted.bam already
-    my $sorted_bam = "$output_dir$fn\_name-sorted.bam";
+    my $sorted_bam = "$output_dir/$fn\_name-sorted.bam";
     if ( -e "$sorted_bam" ) { $files_exist = 1; }
     if ( $files_exist == 1 && $overwrite == 0 ) {
         if ( $self->{verbose} ) {
@@ -1920,7 +1922,7 @@ sub prelim_filter {
     ## (1). Sort the bam by name instead of position
     if ( $name_sort_input == 1 ) {
         if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Sort Start ========\n"; $self->time_check; }
-        my $cmd = "samtools sort -n -@ $self->{threads} -m $self->{sort_mem} $input $output_dir$fn\_name-sorted";
+        my $cmd = "samtools sort -n -@ $self->{threads} -m $self->{sort_mem} $input $output_dir/$fn\_name-sorted";
         if ( $self->{verbose} ) { print STDERR "======== &prelim_filter Sort: $cmd ===\n"; }
         $self->_run_cmd("$cmd");
         if ( $self->{verbose} ) { print STDERR "======== &prelim_filter: Sort Finished ========\n"; $self->time_check; }
@@ -2325,6 +2327,9 @@ sub fail {
         input           =>  Input bam to parse LGT reads from
         by_clone        =>  LGTFinder Output
         by_trace        =>  Not implemented yet.
+        host_blast_otu  =>  Each pair of reads must have only 1 read with this string in the OTU. Ex: Homo
+        host_lineage    =>  
+        donor_lineage   =>
         output_dir      =>  /path/for/output/
         output_prefix   =>  {$prefix}_$suffix.bam  [ {$input_fn}.bam ]
         output_suffix   =>  $prefix_{$suffix}.bam  [ "filterd" ]
@@ -2354,6 +2359,10 @@ sub validated_bam {
         $out_dir = $bar;
     }
 
+    my $host_blast_otu = defined $config->{host_blast_otu} ? $config->{host_blast_otu} : $self->{host_blast_otu};   ## Example: Homo
+    my $host_lin       = defined $config->{host_lineage}   ? $config->{host_lineage}   : $self->{host_lineage};     ## Example: Eukaryota
+    my $donor_lin      = defined $config->{donor_lineage}  ? $config->{donor_lineage}  : $self->{donor_lineage};    ## Example: Bacteria
+
     open( IN, "<", "$config->{by_clone}" )
         || $self->fail("*** Error *** &validated_bam can not open input: $config->{by_clone}\n");
     open( OUT, ">", "$out_dir/$prefix\_valid_blast_read.list" )
@@ -2362,14 +2371,13 @@ sub validated_bam {
     while (<IN>) {
         chomp;
         my ( $read, $otu1, $otu2, $lca1, $lca2 ) = ( split /\t/, $_ )[ 0, 1, 2, 6, 11 ];
-
-        # This needs to be checked. Might be too stringent? 12.04.13 KBS. This is also super specific for human lgt ...
-        next if ( $otu1 =~ /Homo/      && $otu2 =~ /Homo/ );
-        next if ( $otu1 !~ /Homo/      && $otu2 !~ /Homo/ );
-        next if ( $lca1 =~ /Eukaryota/ && $lca2 =~ /Eukaryota/ );
-        next if ( $lca1 =~ /Bacteria/  && $lca2 =~ /Bacteria/ );
+        next if ( $otu1 =~ /$host_blast_otu/ && $otu2 =~ /$host_blast_otu/ );    ## Example: /Homo/
+        next if ( $otu1 !~ /$host_blast_otu/ && $otu2 !~ /$host_blast_otu/ );
+        next if ( $lca1 =~ /$host_lin/       && $lca2 =~ /$host_lin/ );          ## Example: /Eukaryota/
+        next if ( $lca1 =~ /$donor_lin/      && $lca2 =~ /$donor_lin/ );         ## Example: /Bacteria/
         print OUT "$read\n";
     }
+
     close IN || $self->fail("*** Error *** &validated_bam can't close input by_clone: $config->{by_clone} because: $!\n");
     close OUT
         || $self->fail("*** Error *** &validated_bam can't close output valid_blast.list: $out_dir/$prefix\_valid_blast_read.list because: $!\n");
@@ -2555,7 +2563,7 @@ sub new2 {
         sam_suffix_list => [ '.sam.gz', '.sam' ],
         bam_suffix_list => [
             '_resorted.\d+.bam', '_resorted\.bam', '\.gpg\.bam',  '_prelim\.bam', '_name-sort\.bam', '_pos-sort\.bam', '_psort\.bam', '-psort\.bam',
-            '\.psort\.bam',      '\.psrt\.bam',    '_nsort\.bam', '\.nsrt\.bam',  '\.srt\.bam',      '\.sorted\.bam',  '\.bam'
+            '\.psort\.bam',      '\.psrt\.bam',    '_nsort\.bam', '\.nsrt\.bam',  '\.srt\.bam',      '\.sorted\.bam',  '.bam'
         ],
         fastq_suffix_list   => [ qr/_[12]{1}\.f\w{0,3}q(.gz)?/, qr/_[12]{1}(\.\w+)?\.f\w*q(.gz)?/, qr/((_[12]{1})?\.\w+)?\.f\w*q(.gz)?/, '\.fastq\.gz', '\.f\w{0,3}q' ],
         fasta_suffix_list   => [ qr/.f\w{3}a(.gz)?/,            '.fasta',                          '.fa' ],
